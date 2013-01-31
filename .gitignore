@@ -1,0 +1,8 @@
+/android-toolchain-eabi/
+/kbuild-*/
+/massbuild-*.log
+/out/
+/installer/boot.img
+/installer/system/lib/modules/*.ko
+/installer/META-INF/com/google/android/updater-script
+/uninstaller/META-INF/com/google/android/updater-script

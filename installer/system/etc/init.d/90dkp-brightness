@@ -1,0 +1,4 @@
+#!/system/bin/sh
+# Set channel brightness, on a scale of 0-256.
+#     R   G   B
+echo 256 256 256 >/sys/class/mdnie/mdnie/scaling_factors
