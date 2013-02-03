@@ -2,11 +2,18 @@
 
 ### CONFIGURABLE SETTINGS: ###
 
-ALLDEVS=(d2spr d2att d2vzw d2usc d2cri)
+# Devices available to build for
+ALLDEVS=(d2att d2cri d2spr d2usc d2vzw)
+# Devices that will be be marked 'release'
 STABLE=(d2spr)
+# Kernel source location, relative to massbuild.sh
 KSRC=../android_kernel_samsung_d2
+# Ramdisk source, relative to massbuild.sh
 RDSRC=../../cm101/out/target/product/d2spr/root
+# defconfig format, will be expanded per-device
 CFGFMT='cyanogen_${dev}_defconfig'
+# Where to push flashable builds to (internal/external "SD" card)
+FLASH=external
 
 ###  END OF CONFIGURABLES  ###
 
@@ -58,6 +65,7 @@ CF=false
 CL=false
 EXP=false
 PKG=true
+FL=false
 while [[ "$1" ]]
 do
 	case "$1" in
@@ -67,6 +75,7 @@ do
 	(-C|--clean) CL=true;;
 	(-e|--experimental) EXP=true; BD="$(date +%s)"; BDIR="out/experimental";;
 	(-n|--no-package) PKG=false;;
+	(-f|--flash) FL=true; EXP=true; BD="$(date +%s)"; BDIR="out/experimental";;
 	(*) 	if [[ "${ALLDEVS[*]}" == *$1* ]]
 		then DEVS=("${DEVS[@]}" "$1")
 		else
@@ -74,12 +83,13 @@ do
 			Usage: $0 [options] [devices]
 			Devices: ${ALLDEVS[*]} (edit $0 to update list)
 			Options:
-			-l (--linaro): upgrade Linaro toolchain ($(dirname "$0")/android-toolchain-eabi)
-			-r (--ramdisk): regenerate ramdisk from built Android sources
 			-c (--config): make each device's defconfig before building
 			-C (--clean): make clean for each device before building
 			-e (--experimental): package builds as "experimental"
+			-f (--flash): automagically flash; implies -e
+			-l (--linaro): upgrade Linaro toolchain ($(dirname "$0")/android-toolchain-eabi), implies -C
 			-n (--no-package): just build, don't package
+			-r (--ramdisk): regenerate ramdisk from built Android sources
 			EOF
 			exit 1
 		fi
@@ -89,6 +99,22 @@ done
 
 # Make sure we have devices to build
 [[ "${DEVS[*]}" ]] || DEVS=("${ALLDEVS[@]}")
+
+if $FL
+then
+	flashdev="$(adb shell getprop ro.product.device | sed 's/[^[:print:]]//g')"
+	if [[ "${DEVS[*]}" != *$flashdev* ]]
+	then
+		echo "Not building for device to be flashed ($flashdev)!"
+		echo "Refusing to continue."
+		exit 1
+	fi
+	case "$FLASH" in
+	(internal) flashdir="/storage/sdcard0";;
+	(external) flashdir="/storage/sdcard1";;
+	(*) echo "FLASH must be 'internal' or 'external'"; exit 1;;
+	esac
+fi
 
 # Update Linaro?
 if $GL
@@ -148,7 +174,7 @@ EOF
 for dev in "${DEVS[@]}"
 do
 	echo "Packaging $dev..."
-	# CM uses rdo 0x0130000
+	# CM uses rdo 0x0130000, but we need a few extra MB thanks to linaro -O3
 	./mkbootimg \
 		--kernel "kbuild-$dev/arch/arm/boot/zImage" \
 		--ramdisk "initramfs.gz" \
@@ -168,7 +194,33 @@ do
 	echo "Created $BDIR/dkp-$btype-$dev-$BD.zip"
 done
 
-! $EXP || exit 0
+if $EXP
+then
+	echo
+	read -n 1 -p 'Review build logs? '
+	[[ "$REPLY" == [Yy] ]] && \
+		less $(sed 's/\(^\| \)\([^ ]*\)/massbuild-\2.log /g' <<<"${DEVS[*]}")
+	echo
+	if $FL
+	then
+		read -n 1 -p 'Flash to device? '
+		if [[ "$REPLY" == [Yy] ]]
+		then
+			echo
+			# adb always returns 0, which sucks.
+			adb shell "mkdir -p \"$flashdir/massbuild/\""
+			echo "Pushing dkp-$btype-$flashdev-$BD.zip..."
+			adb push "$BDIR/dkp-$btype-$flashdev-$BD.zip" \
+				"$flashdir/massbuild/dkp-$btype-$flashdev-$BD.zip"
+			echo "Generating OpenRecoveryScript..."
+			adb shell "su -c 'echo \"install massbuild/dkp-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'"
+			echo "Rebooting to recovery..."
+			adb reboot recovery
+		fi
+	fi
+	exit 0
+fi
+
 echo
 echo "Building uninstaller..."
 echo "Generating uninstall script..."
