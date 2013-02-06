@@ -19,12 +19,12 @@ FLASH=external
 
 # Dev-Host upload configs as (release_val experimental_val)
 # DHUSER and DHPASS should be set in devhostauth.sh
-# Upload directory
+# Upload directory, must already exist
 DHDIRS=(/DKP /DKP-WIP)
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
-# Upload description
-DHDESC=('DKP ${BD} release for ${dev}' 'DKP test build for ${dev}' 'DKP ${BD} uninstaller')
+# Upload description (release experimental uninstaller)
+DHDESC=('DKP $(date +%x) release for ${dev}' 'DKP test build for ${dev}' 'DKP $(date +%x) uninstaller')
 
 ###  END OF CONFIGURABLES  ###
 
@@ -78,14 +78,13 @@ dhup() {
 	html="$(curl -s -b <(echo "$cookies") d-h.st)"
 	# Look up directory id
 	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${1//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")"
-	# Look up form action (i.e. which server)
+	# Look up form action (i.e. URL)
 	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")"
 	# Guess userid from cookie instead of looking it up
 	userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")"
 	dhpub="$2"
-	shift 2;
+	shift 2
 	dhargs=()
-	#while [[ "$1" ]]; do dhargs="$dhargs -F 'files[]=@$1' -F 'file_description[]=$2'"; shift 2; done
 	while [[ "$1" ]]; do dhargs=("${dhargs[@]}" -F "files[]=@$1" -F "file_description[]=$2"); shift 2; done
 	# pull upload_id from action instead of looking it up
 	echo "Uploading..."
@@ -149,6 +148,7 @@ fi
 
 if $FL
 then
+	adb start-server >/dev/null 2>&1
 	flashdev="$(adb shell getprop ro.product.device | sed 's/[^[:print:]]//g')"
 	if [[ "${DEVS[*]}" != *$flashdev* ]]
 	then
@@ -271,7 +271,6 @@ then
 		if [[ "$REPLY" == [Yy] ]]
 		then
 			echo
-			echo "Uploading to Dev-Host..."
 			dhupargs=()
 			for dev in "${DEVS[@]}"
 			do
@@ -317,12 +316,15 @@ echo "Created $BDIR/uninstall-$NAME-$BD.zip"
 if $DH
 then
 	echo
-	echo "Uploading to Dev-Host..."
 	dhupargs=()
 	for dev in "${DEVS[@]}"
 	do
-		dhupargs=("${dhupargs[@]}" "$BDIR/$NAME-$btype-$dev-$BD.zip" "$(eval echo "${DHDESC[1]}")")
+		if [[ "${STABLE[@]}" == *$dev* ]]
+		then btype=release
+		else btype=testing
+		fi
+		dhupargs=("${dhupargs[@]}" "$BDIR/$NAME-$btype-$dev-$BD.zip" "$(eval echo "${DHDESC[0]}")")
 	done
-	dhupargs=("${dhupargs[@]}" "$BDIR/uninstall-$NAME-$BD.zip" "${DHDESC[2]}")
+	dhupargs=("${dhupargs[@]}" "$BDIR/uninstall-$NAME-$BD.zip" "$(eval echo "${DHDESC[2]}")")
 	dhup "${DHDIRS[0]}" "${DHPUB[0]}" "${dhupargs[@]}"
 fi
