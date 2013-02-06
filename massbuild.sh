@@ -2,6 +2,8 @@
 
 ### CONFIGURABLE SETTINGS: ###
 
+# Kernel name used for filenames
+NAME=dkp
 # Devices available to build for
 ALLDEVS=(d2att d2cri d2spr d2usc d2vzw)
 # Devices that will be be marked 'release'
@@ -15,10 +17,19 @@ CFGFMT='cyanogen_${dev}_defconfig'
 # Where to push flashable builds to (internal/external "SD" card)
 FLASH=external
 
+# Dev-Host upload configs as (release_val experimental_val)
+# Upload directory
+DHDIRS=(/DKP /DKP-WIP)
+# Make public (1 = public, 0 = private)
+DHPUB=(1 1)
+# Upload description
+DHDESC=('DKP ${BD} release for ${dev}' 'DKP test build for ${dev}' 'DKP ${BD} uninstaller')
+# also set DHUSER and DHPASS in devhostauth.sh
+
 ###  END OF CONFIGURABLES  ###
 
 DEVS=()
-let MAKEJ="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)" MAKEL=MAKEJ*3/2
+let MAKEJ="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)" MAKEL=MAKEJ+1
 export CROSS_COMPILE=../android-toolchain-eabi/bin/arm-eabi-
 BD="$(date +%Y%m%d)"
 BDIR="out/release-$BD"
@@ -30,7 +41,7 @@ kb() {
 	shift
 	echo "Making ${@:-all} for $D..."
 	mkdir -p "kbuild-$D"
-	make -j $MAKEJ -l $MAKEL -C "$KSRC" O="$(pwd)/kbuild-$D" "$@" >"massbuild-$dev.log" 2>&1 || \
+	make -j $MAKEJ -l $MAKEL -C "$KSRC" O="$(pwd)/kbuild-$D" "$@" >"massbuild-$D.log" 2>&1 || \
 		{ touch build-failed-"$D"; false; }
 }
 
@@ -57,6 +68,32 @@ kba() {
 	fi
 }
 
+# Upload to Dev-Host.  This could be done better, but I <3 sed.
+dhup() {
+	(( $# > 2 && $# % 2 == 0 ))
+	. ./devhostauth.sh
+	[[ "$DHUSER" && "$DHPASS" ]]
+	# Sign in.  Resulting page isn't useful.
+	echo "Logging in as $DHUSER..."
+	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o /dev/null d-h.st)"
+	# Fetch signed-in upload page.
+	html="$(curl -s -b <(echo "$cookies") d-h.st)"
+	# Look up directory id
+	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${1//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")"
+	# Look up form action (i.e. which server)
+	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")"
+	# Guess userid from cookie instead of looking it up
+	userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")"
+	dhpub="$2"
+	shift 2;
+	dhargs=()
+	#while [[ "$1" ]]; do dhargs="$dhargs -F 'files[]=@$1' -F 'file_description[]=$2'"; shift 2; done
+	while [[ "$1" ]]; do dhargs=("${dhargs[@]}" -F "files[]=@$1" -F "file_description[]=$2"); shift 2; done
+	# pull upload_id from action instead of looking it up
+	echo "Uploading..."
+	curl -F "UPLOAD_IDENTIFIER=${action##*=}" -F "action=upload" -F "uploadfolder=$dirid" -F "public=$dhpub" -F "user_id=$userid" "${dhargs[@]}" -b <(echo "$cookies") "$action" -o /dev/null
+}
+
 cd "$(dirname "$(readlink -f "$0")")"
 
 GL=false
@@ -66,6 +103,7 @@ CL=false
 EXP=false
 PKG=true
 FL=false
+DH=false
 while [[ "$1" ]]
 do
 	case "$1" in
@@ -76,6 +114,7 @@ do
 	(-e|--experimental) EXP=true; BD="$(date +%s)"; BDIR="out/experimental";;
 	(-n|--no-package) PKG=false;;
 	(-f|--flash) FL=true; EXP=true; BD="$(date +%s)"; BDIR="out/experimental";;
+	(-u|--upload) DH=true;;
 	(*) 	if [[ "${ALLDEVS[*]}" == *$1* ]]
 		then DEVS=("${DEVS[@]}" "$1")
 		else
@@ -90,6 +129,7 @@ do
 			-l (--linaro): upgrade Linaro toolchain ($(dirname "$0")/android-toolchain-eabi), implies -C
 			-n (--no-package): just build, don't package
 			-r (--ramdisk): regenerate ramdisk from built Android sources
+			-u (--upload): upload builds to Dev-Host
 			EOF
 			exit 1
 		fi
@@ -189,9 +229,9 @@ do
 	then btype=release
 	else btype=testing
 	fi
-	rm -f "$BDIR/dkp-$btype-$dev-$BD.zip"
-	(cd installer && zip -qr "../$BDIR/dkp-$btype-$dev-$BD.zip" *)
-	echo "Created $BDIR/dkp-$btype-$dev-$BD.zip"
+	rm -f "$BDIR/$NAME-$btype-$dev-$BD.zip"
+	(cd installer && zip -qr "../$BDIR/$NAME-$btype-$dev-$BD.zip" *)
+	echo "Created $BDIR/$NAME-$btype-$dev-$BD.zip"
 done
 
 if $EXP
@@ -209,13 +249,28 @@ then
 			echo
 			# adb always returns 0, which sucks.
 			adb shell "mkdir -p \"$flashdir/massbuild/\""
-			echo "Pushing dkp-$btype-$flashdev-$BD.zip..."
-			adb push "$BDIR/dkp-$btype-$flashdev-$BD.zip" \
-				"$flashdir/massbuild/dkp-$btype-$flashdev-$BD.zip"
+			echo "Pushing $NAME-$btype-$flashdev-$BD.zip..."
+			adb push "$BDIR/$NAME-$btype-$flashdev-$BD.zip" \
+				"$flashdir/massbuild/$NAME-$btype-$flashdev-$BD.zip"
 			echo "Generating OpenRecoveryScript..."
-			adb shell "su -c 'echo \"install massbuild/dkp-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'"
+			adb shell "su -c 'echo \"install massbuild/$NAME-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'"
 			echo "Rebooting to recovery..."
 			adb reboot recovery
+		fi
+	fi
+	if $DH
+	then
+		read -n 1 -p 'Upload to Dev-Host? '
+		if [[ "$REPLY" == [Yy] ]]
+		then
+			echo
+			echo "Uploading to Dev-Host..."
+			dhupargs=()
+			for dev in "${DEVS[@]}"
+			do
+				dhupargs=("${dhupargs[@]}" "$BDIR/$NAME-$btype-$dev-$BD.zip" "$(eval echo "${DHDESC[1]}")")
+			done
+			dhup "${DHDIRS[1]}" "${DHPUB[1]}" "${dhupargs[@]}"
 		fi
 	fi
 	exit 0
@@ -248,6 +303,19 @@ cat >uninstaller/META-INF/com/google/android/updater-script <<-EOF
 	run_program("/sbin/busybox", "umount", "/system");
 EOF
 echo "Packaging uninstaller..."
-rm -f "$BDIR/uninstall-dkp-$BD.zip"
-(cd uninstaller && zip -qr "../$BDIR/uninstall-dkp-$BD.zip" *)
-echo "Created $BDIR/uninstall-dkp-$BD.zip"
+rm -f "$BDIR/uninstall-$NAME-$BD.zip"
+(cd uninstaller && zip -qr "../$BDIR/uninstall-$NAME-$BD.zip" *)
+echo "Created $BDIR/uninstall-$NAME-$BD.zip"
+
+if $DH
+then
+	echo
+	echo "Uploading to Dev-Host..."
+	dhupargs=()
+	for dev in "${DEVS[@]}"
+	do
+		dhupargs=("${dhupargs[@]}" "$BDIR/$NAME-$btype-$dev-$BD.zip" "$(eval echo "${DHDESC[1]}")")
+	done
+	dhupargs=("${dhupargs[@]}" "$BDIR/uninstall-$NAME-$BD.zip" "${DHDESC[2]}")
+	dhup "${DHDIRS[0]}" "${DHPUB[0]}" "${dhupargs[@]}"
+fi

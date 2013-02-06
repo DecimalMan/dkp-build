@@ -1,6 +1,7 @@
 /android-toolchain-eabi/
 /kbuild-*/
 /massbuild-*.log
+/devhostauth.sh
 /out/
 /installer/boot.img
 /installer/system/lib/modules/*.ko
