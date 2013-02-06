@@ -18,21 +18,19 @@ CFGFMT='cyanogen_${dev}_defconfig'
 FLASH=external
 
 # Dev-Host upload configs as (release_val experimental_val)
+# DHUSER and DHPASS should be set in devhostauth.sh
 # Upload directory
 DHDIRS=(/DKP /DKP-WIP)
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
 # Upload description
 DHDESC=('DKP ${BD} release for ${dev}' 'DKP test build for ${dev}' 'DKP ${BD} uninstaller')
-# also set DHUSER and DHPASS in devhostauth.sh
 
 ###  END OF CONFIGURABLES  ###
 
 DEVS=()
 let MAKEJ="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)" MAKEL=MAKEJ+1
 export CROSS_COMPILE=../android-toolchain-eabi/bin/arm-eabi-
-BD="$(date +%Y%m%d)"
-BDIR="out/release-$BD"
 
 # Run a build in its own device-specific dir
 kb() {
@@ -100,7 +98,7 @@ GL=false
 RD=false
 CF=false
 CL=false
-EXP=false
+EXP=true
 PKG=true
 FL=false
 DH=false
@@ -108,12 +106,12 @@ while [[ "$1" ]]
 do
 	case "$1" in
 	(-l|--linaro) GL=true;;
-	(-r|--ramdisk) RD=true;;
+	(-R|--ramdisk) RD=true;;
 	(-c|--config) CF=true;;
 	(-C|--clean) CL=true;;
-	(-e|--experimental) EXP=true; BD="$(date +%s)"; BDIR="out/experimental";;
+	(-r|--release) EXP=false;;
 	(-n|--no-package) PKG=false;;
-	(-f|--flash) FL=true; EXP=true; BD="$(date +%s)"; BDIR="out/experimental";;
+	(-f|--flash) FL=true;;
 	(-u|--upload) DH=true;;
 	(*) 	if [[ "${ALLDEVS[*]}" == *$1* ]]
 		then DEVS=("${DEVS[@]}" "$1")
@@ -124,11 +122,11 @@ do
 			Options:
 			-c (--config): make each device's defconfig before building
 			-C (--clean): make clean for each device before building
-			-e (--experimental): package builds as "experimental"
-			-f (--flash): automagically flash; implies -e
+			-f (--flash): automagically flash
 			-l (--linaro): upgrade Linaro toolchain ($(dirname "$0")/android-toolchain-eabi), implies -C
 			-n (--no-package): just build, don't package
-			-r (--ramdisk): regenerate ramdisk from built Android sources
+			-r (--release): package builds for release; generate uninstaller
+			-R (--ramdisk): regenerate ramdisk from built Android sources
 			-u (--upload): upload builds to Dev-Host
 			EOF
 			exit 1
@@ -139,6 +137,15 @@ done
 
 # Make sure we have devices to build
 [[ "${DEVS[*]}" ]] || DEVS=("${ALLDEVS[@]}")
+
+if $EXP
+then
+	BD="$(date +%s)"
+	BDIR="out/experimental"
+else
+	BD="$(date +%Y%m%d)"
+	BDIR="out/release-$BD"
+fi
 
 if $FL
 then
