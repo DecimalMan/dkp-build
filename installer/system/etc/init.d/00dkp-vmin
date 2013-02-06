@@ -1,0 +1,2 @@
+#!/system/bin/sh
+echo 700 >/sys/devices/system/cpu/cpufreq/dkp/vmin
