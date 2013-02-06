@@ -111,7 +111,7 @@ do
 	(-C|--clean) CL=true;;
 	(-r|--release) EXP=false;;
 	(-n|--no-package) PKG=false;;
-	(-f|--flash) FL=true;;
+	(-f|--flash) FL=true; EXP=true;;
 	(-u|--upload) DH=true;;
 	(*) 	if [[ "${ALLDEVS[*]}" == *$1* ]]
 		then DEVS=("${DEVS[@]}" "$1")
