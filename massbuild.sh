@@ -57,10 +57,10 @@ kba() {
 		ls build-failed-* | sed -e 's/build-failed-//'
 		echo
 		read -n 1 -p 'Read build logs? '
+		echo
 		[[ "$REPLY" == [Yy] ]] && \
 			less $(ls build-failed-* | \
 			sed -n 's/build-failed-\(d2[a-z]\{3\}\)/massbuild-\1.log/; T; p')
-		echo
 		rm -f build-failed-*
 		false
 	fi
@@ -150,6 +150,9 @@ if $FL
 then
 	adb start-server >/dev/null 2>&1
 	flashdev="$(adb shell getprop ro.product.device | sed 's/[^[:print:]]//g')"
+	[[ "$flashdev" == *"getprop: not found" ]] && \
+	flashdev="$(adb shell sed -n '/^ro.product.device/ { s/.*=//; p; }' /default.prop | \
+	sed 's/[^[:print:]]//g')"
 	if [[ "${DEVS[*]}" != *$flashdev* ]]
 	then
 		echo "Not building for device to be flashed ($flashdev)!"
@@ -157,10 +160,12 @@ then
 		exit 1
 	fi
 	case "$FLASH" in
-	(internal) flashdir="/storage/sdcard0";;
-	(external) flashdir="/storage/sdcard1";;
+	(internal) flashdirs=(/storage/sdcard0 /sdcard/0);;
+	(external) flashdirs=(/storage/sdcard1 /external_sd);;
 	(*) echo "FLASH must be 'internal' or 'external'"; exit 1;;
 	esac
+	flashdir="$(adb shell ls -d "${flashdirs[@]}" | sed 's/[^[:print:]]//g' | \
+		grep -v 'No such file or directory')"
 fi
 
 # Update Linaro?
@@ -245,22 +250,22 @@ if $EXP
 then
 	echo
 	read -n 1 -p 'Review build logs? '
+	echo
 	[[ "$REPLY" == [Yy] ]] && \
 		less $(sed 's/\(^\| \)\([^ ]*\)/massbuild-\2.log /g' <<<"${DEVS[*]}")
-	echo
 	if $FL
 	then
 		read -n 1 -p 'Flash to device? '
+		echo
 		if [[ "$REPLY" == [Yy] ]]
 		then
-			echo
 			# adb always returns 0, which sucks.
 			adb shell "mkdir -p \"$flashdir/massbuild/\""
 			echo "Pushing $NAME-$btype-$flashdev-$BD.zip..."
 			adb push "$BDIR/$NAME-$btype-$flashdev-$BD.zip" \
 				"$flashdir/massbuild/$NAME-$btype-$flashdev-$BD.zip"
 			echo "Generating OpenRecoveryScript..."
-			adb shell "su -c 'echo \"install massbuild/$NAME-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'"
+			adb shell "e='echo \"install massbuild/$NAME-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'; su -c \"\$e\" || eval \"\$e\"" >/dev/null 2>&1
 			echo "Rebooting to recovery..."
 			adb reboot recovery
 		fi
@@ -268,9 +273,9 @@ then
 	if $DH
 	then
 		read -n 1 -p 'Upload to Dev-Host? '
+		echo
 		if [[ "$REPLY" == [Yy] ]]
 		then
-			echo
 			dhupargs=()
 			for dev in "${DEVS[@]}"
 			do
