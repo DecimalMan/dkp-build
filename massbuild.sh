@@ -2,14 +2,15 @@
 
 ### CONFIGURABLE SETTINGS: ###
 
+# Kernel source location, relative to massbuild.sh
+KSRC=../android_kernel_samsung_d2
 # Kernel name used for filenames
-NAME=dkp
+#NAME=dkp
+NAME="$(cd "$KSRC" && git symbolic-ref --short HEAD)"
 # Devices available to build for
 ALLDEVS=(d2att d2cri d2spr d2usc d2vzw)
 # Devices that will be be marked 'release'
 STABLE=(d2spr)
-# Kernel source location, relative to massbuild.sh
-KSRC=../android_kernel_samsung_d2
 # Ramdisk source, relative to massbuild.sh
 RDSRC=../../cm101/out/target/product/d2spr/root
 # defconfig format, will be expanded per-device
@@ -24,7 +25,7 @@ DHDIRS=(/DKP /DKP-WIP)
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
 # Upload description (release experimental uninstaller)
-DHDESC=('DKP $(date +%x) release for ${dev}' 'DKP test build for ${dev}' 'DKP $(date +%x) uninstaller')
+DHDESC=('$NAME $(date +%x) release for $dev' '$NAME test build for $dev' '$NAME $(date +%x) uninstaller')
 
 ###  END OF CONFIGURABLES  ###
 
@@ -171,10 +172,11 @@ fi
 # Update Linaro?
 if $GL
 then
-	echo "Fetching latest Linaro toolchain..."
+	echo "Fetching latest Linaro nightly toolchain..."
 	mv android-toolchain-eabi{,.old}
 	curl "http://snapshots.linaro.org/android/~linaro-android/toolchain-4.7-bzr/lastSuccessful/android-toolchain-eabi-4.7-daily-linux-x86.tar.bz2" | tar xj
 	rm -Rf android-toolchain-eabi.old
+	echo
 fi
 
 # Rebuild ramdisk?
@@ -183,11 +185,12 @@ then
 	echo "Rebuilding initramfs..."
 	./mkbootfs "$RDSRC" | gzip -9 >initramfs.gz.tmp
 	mv initramfs.gz.tmp initramfs.gz
+	echo
 fi
 
-echo "Building..."
+echo "Building $NAME..."
 if ! $EXP
-then for dev in "${DEVS[@]}"; do rm -f "$dev/.version"; done
+then for dev in "${DEVS[@]}"; do rm -f "kbuild-$dev/.version"; done
 fi
 if $CL || $GL
 then kba clean
@@ -199,7 +202,7 @@ kba
 
 $PKG || exit 0
 echo
-echo "Packaging..."
+echo "Packaging $NAME..."
 mkdir -p "$BDIR"
 echo "Generating install script..."
 cat >installer/META-INF/com/google/android/updater-script <<-EOF
