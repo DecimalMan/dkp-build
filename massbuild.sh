@@ -102,6 +102,7 @@ EXP=true
 PKG=true
 FL=false
 DH=false
+OC=false
 while [[ "$1" ]]
 do
 	case "$1" in
@@ -113,6 +114,7 @@ do
 	(-n|--no-package) PKG=false;;
 	(-f|--flash) FL=true; EXP=true;;
 	(-u|--upload) DH=true;;
+	(-o|--oldconfig) OC=true;;
 	(*) 	if [[ "${ALLDEVS[*]}" == *$1* ]]
 		then DEVS=("${DEVS[@]}" "$1")
 		else
@@ -125,6 +127,7 @@ do
 			-f (--flash): automagically flash
 			-l (--linaro): upgrade Linaro toolchain ($(dirname "$0")/android-toolchain-eabi), implies -C
 			-n (--no-package): just build, don't package
+			-o (--oldconfig): make oldconfig for each device before building
 			-r (--release): package builds for release; generate uninstaller
 			-R (--ramdisk): regenerate ramdisk from built Android sources
 			-u (--upload): upload builds to Dev-Host
@@ -191,6 +194,9 @@ fi
 echo "Building $NAME..."
 if ! $EXP
 then for dev in "${DEVS[@]}"; do rm -f "kbuild-$dev/.version"; done
+fi
+if $OC
+then for dev in "${DEVS[@]}"; do make -C "$KSRC" O="$(pwd)/kbuild-$dev" oldconfig; done
 fi
 if $CL || $GL
 then kba clean
@@ -324,7 +330,7 @@ echo "Created $BDIR/uninstall-$NAME-$BD.zip"
 if $DH
 then
 	echo
-	dhupargs=()
+	dhupargs=("${dhupargs[@]}" "$BDIR/uninstall-$NAME-$BD.zip" "$(eval echo "${DHDESC[2]}")")
 	for dev in "${DEVS[@]}"
 	do
 		if [[ "${STABLE[@]}" == *$dev* ]]
@@ -333,6 +339,5 @@ then
 		fi
 		dhupargs=("${dhupargs[@]}" "$BDIR/$NAME-$btype-$dev-$BD.zip" "$(eval echo "${DHDESC[0]}")")
 	done
-	dhupargs=("${dhupargs[@]}" "$BDIR/uninstall-$NAME-$BD.zip" "$(eval echo "${DHDESC[2]}")")
 	dhup "${DHDIRS[0]}" "${DHPUB[0]}" "${dhupargs[@]}"
 fi
