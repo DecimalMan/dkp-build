@@ -186,7 +186,13 @@ fi
 if $RD || ! [[ -f initramfs.gz ]]
 then
 	echo "Rebuilding initramfs..."
-	./mkbootfs "$RDSRC" | gzip -9 >initramfs.gz.tmp
+	rdtmp="$(mktemp -d 'initramfs.XXXXXX')"
+	cp -r "${RDSRC}"/* "$rdtmp"
+	[[ -d ramdisk-overlay ]] && \
+		cp -r ramdisk-overlay/* "$rdtmp"
+	./mkbootfs "$rdtmp" | gzip -9 >initramfs.gz.tmp
+	rm -rf "$rdtmp"
+	#./mkbootfs "$RDSRC" | gzip -9 >initramfs.gz.tmp
 	mv initramfs.gz.tmp initramfs.gz
 	echo
 fi
