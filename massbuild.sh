@@ -188,11 +188,10 @@ then
 	echo "Rebuilding initramfs..."
 	rdtmp="$(mktemp -d 'initramfs.XXXXXX')"
 	cp -r "${RDSRC}"/* "$rdtmp"
-	[[ -d ramdisk-overlay ]] && \
+	ls ramdisk-overlay/* &>/dev/null &&
 		cp -r ramdisk-overlay/* "$rdtmp"
 	./mkbootfs "$rdtmp" | gzip -9 >initramfs.gz.tmp
 	rm -rf "$rdtmp"
-	#./mkbootfs "$RDSRC" | gzip -9 >initramfs.gz.tmp
 	mv initramfs.gz.tmp initramfs.gz
 	echo
 fi
@@ -228,9 +227,9 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	done
 	)$([[ -f installer/system/etc/init.qcom.post_boot.sh ]] && echo && \
 	echo 'set_perm(0, 0, 0755, "/system/etc/init.qcom.post_boot.sh");'
-	)$([[ -d installer/system/xbin ]] && echo && \
+	)$(ls installer/system/xbin/* &>/dev/null && echo && \
 	for f in installer/system/xbin/*
-	do echo "set_perm(0, 0, 0755, \"/system/xbin/$f\");"
+	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
 	done
 	)
 	ui_print("unmounting system");
