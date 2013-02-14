@@ -31,12 +31,10 @@ Usage:
 
 Try ```./massbuild.sh --help```.  My typical usage is ```./massbuild.sh -f d2spr``` until everything works, then ```./massbuild.sh -l -r -u``` to publish a new release with a fresh Linaro toolchain.
 
-Note that massbuild.sh is sort of stupid, and doesn't understand combined short parameters (eg. -lru).
-
 Limitations:
 ------------
 
-Currently, only one initramfs is generated, which is shared across all devices.  This works on d2, but other device families may need per-device ramdisks.
+Currently, only one initramfs and updater-script is generated, which is shared across all devices.  This works on d2, but other device families may need per-device ramdisks or installers.
 
 Included binaries:
 ------------------

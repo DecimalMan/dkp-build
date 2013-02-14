@@ -13,6 +13,9 @@ ALLDEVS=(d2att d2cri d2spr d2usc d2vzw)
 STABLE=(d2spr)
 # Ramdisk source, relative to massbuild.sh
 RDSRC=../../cm101/out/target/product/d2spr/root
+# boot.img command line and arguments.
+BOOTCLI='console = null androidboot.hardware=qcom user_debug=31 zcache'
+BOOTARGS='--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01900000'
 # defconfig format, will be expanded per-device
 CFGFMT='cyanogen_$@_defconfig'
 # Where to push flashable builds to (internal/external "SD" card)
@@ -73,20 +76,22 @@ PKG=true
 FL=false
 DH=false
 OC=false
-while [[ "$1" ]]
+v="$1"
+while [[ "$v" ]]
 do
-	case "$1" in
-	(-l|--linaro) GL=true;;
-	(-R|--ramdisk) RD=true;;
-	(-c|--config) CF=true;;
-	(-C|--clean) CL=true;;
-	(-r|--release) EXP=false;;
-	(-n|--no-package) PKG=false;;
-	(-f|--flash) FL=true; EXP=true;;
-	(-u|--upload) DH=true;;
-	(-o|--oldconfig) OC=true;;
-	(*) 	if [[ "${ALLDEVS[*]}" == *$1* ]]
-		then DEVS=("${DEVS[@]}" "$1")
+	case "$v" in
+	(c|--config) CF=true;;
+	(C|--clean) CL=true;;
+	(f|--flash) FL=true; EXP=true;;
+	(l|--linaro) GL=true;;
+	(n|--no-package) PKG=false;;
+	(o|--oldconfig) OC=true;;
+	(r|--release) EXP=false;;
+	(R|--ramdisk) RD=true;;
+	(u|--upload) DH=true;;
+	(-*);;
+	(*) 	if [[ "${ALLDEVS[*]}" == *"$v"* ]]
+		then DEVS=("${DEVS[@]}" "$v")
 		else
 			cat >&2 <<-EOF
 			Usage: $0 [options] [devices]
@@ -105,7 +110,12 @@ do
 			exit 1
 		fi
 	esac
-	shift
+	if ! getopts "cCflnorRu" v "$1"
+	then
+		shift
+		v="$1"
+		OPTIND=1
+	fi
 done
 
 # Make sure we have devices to build
@@ -122,12 +132,14 @@ fi
 
 if $FL
 then
+	echo "Checking device to be flashed..."
 	adb start-server >/dev/null 2>&1
-	flashdev="$(adb shell getprop ro.product.device | sed 's/[^[:print:]]//g')"
+	adb -d shell : >/dev/null
+	flashdev="$(adb -d shell getprop ro.product.device | sed 's/[^[:print:]]//g')"
 	[[ "$flashdev" == *"getprop: not found" ]] && \
-	flashdev="$(adb shell sed -n '/^ro.product.device/ { s/.*=//; p; }' /default.prop | \
+	flashdev="$(adb -d shell sed -n '/^ro.product.device/ { s/.*=//; p; }' /default.prop | \
 	sed 's/[^[:print:]]//g')"
-	if [[ "${DEVS[*]}" != *$flashdev* ]]
+	if [[ "${DEVS[*]}" != *"$flashdev"* ]]
 	then
 		echo "Not building for device to be flashed ($flashdev)!"
 		echo "Refusing to continue."
@@ -138,7 +150,7 @@ then
 	(external) flashdirs=(/storage/sdcard1 /external_sd);;
 	(*) echo "FLASH must be 'internal' or 'external'"; exit 1;;
 	esac
-	flashdir="$(adb shell ls -d "${flashdirs[@]}" | sed 's/[^[:print:]]//g' | \
+	flashdir="$(adb -d shell ls -d "${flashdirs[@]}" | sed 's/[^[:print:]]//g' | \
 		grep -v 'No such file or directory')"
 fi
 
@@ -174,9 +186,10 @@ if $OC
 then mj=
 else mj="-j $(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
 fi
-if ! make $mj "${DEVS[@]}" -f <(cat <<EOF
+if ! make $mj "${DEVS[@]}" -k -f <(cat <<EOF
 ${DEVS[@]}:
 	@mkdir -p "kbuild-\$@"
+	@touch "build-failed-\$@"
 	@rm -f "massbuild-\$@.log"
 	$($CL && \
 	echo "@echo Cleaning \$@..." && \
@@ -194,29 +207,31 @@ ${DEVS[@]}:
 	echo "	@echo Making all for \$@..." && \
 	echo "$KB $* >>\"massbuild-\$@.log\" 2>&1"
 	)
+	@rm -f "build-failed-\$@"
+	@echo "Finished building \$@."
 .PHONY: ${DEVS[@]}
 EOF
 )
 then
 	echo
-	echo "Some builds failed.  Logs are saved as '$(dirname "$0")/massbuild-<device>.log'."
+	read -n 1 -p 'Some builds failed.  Read build logs? '
+	echo
+	[[ "$REPLY" == [Yy] ]] && \
+		less $(ls build-failed-* | \
+		sed -n 's/build-failed-\(d2[a-z]\{3\}\)/massbuild-\1.log/; T; p')
+	rm -f build-failed-*
 	false
 fi
-if $OC
-then
-	echo
-	echo "Configuration finished.  Please restart without --oldconfig to build."
-	exit 0
-fi
-if ! $PKG
-then
-	echo
-	echo "Building finished.  Not packaging."
-	exit 0
-fi
+
+(n=
+$OC && n="Finished configuration.  Please restart without --oldconfig to build." || true
+$PKG || n="Finished building.  Packaging disabled by --no-package."
+[[ "$n" ]] || exit 0
+echo
+echo "$n"
+false) || exit 0
 
 echo
-echo "Packaging $NAME..."
 mkdir -p "$BDIR"
 echo "Generating install script..."
 cat >installer/META-INF/com/google/android/updater-script <<-EOF
@@ -233,8 +248,7 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	)$(ls installer/system/xbin/* &>/dev/null && echo && \
 	for f in installer/system/xbin/*
 	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
-	done
-	)
+	done)
 	ui_print("unmounting system");
 	unmount("/system");
 	ui_print("flashing kernel");
@@ -243,18 +257,17 @@ EOF
 for dev in "${DEVS[@]}"
 do
 	echo "Packaging $dev..."
-	# CM uses rdo 0x0130000, but we need a few extra MB thanks to linaro -O3
 	./mkbootimg \
 		--kernel "kbuild-$dev/arch/arm/boot/zImage" \
 		--ramdisk "initramfs.gz" \
-		--cmdline 'console = null androidboot.hardware=qcom user_debug=31 zcache' \
-		--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01900000 \
+		--cmdline "$BOOTCLI" \
+		$BOOTARGS \
 		--output "installer/boot.img"
 	rm -f installer/system/lib/modules/*
 	find "kbuild-$dev" -name '*.ko' -exec cp '{}' installer/system/lib/modules ';'
 	if $EXP
 	then btype=experimental
-	elif [[ "${STABLE[@]}" == *$dev* ]]
+	elif [[ "${STABLE[@]}" == *"$dev"* ]]
 	then btype=release
 	else btype=testing
 	fi
@@ -277,14 +290,14 @@ then
 		if [[ "$REPLY" == [Yy] ]]
 		then
 			# adb always returns 0, which sucks.
-			adb shell "mkdir -p \"$flashdir/massbuild/\""
+			adb -d shell "mkdir -p \"$flashdir/massbuild/\""
 			echo "Pushing $NAME-$btype-$flashdev-$BD.zip..."
-			adb push "$BDIR/$NAME-$btype-$flashdev-$BD.zip" \
+			adb -d push "$BDIR/$NAME-$btype-$flashdev-$BD.zip" \
 				"$flashdir/massbuild/$NAME-$btype-$flashdev-$BD.zip"
 			echo "Generating OpenRecoveryScript..."
-			adb shell "e='echo \"install massbuild/$NAME-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'; su -c \"\$e\" || eval \"\$e\"" >/dev/null 2>&1
+			adb -d shell "e='echo \"install massbuild/$NAME-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'; su -c \"\$e\" || eval \"\$e\"" >/dev/null 2>&1
 			echo "Rebooting to recovery..."
-			adb reboot recovery
+			adb -d reboot recovery
 		fi
 	fi
 	if $DH
@@ -304,8 +317,6 @@ then
 	exit 0
 fi
 
-echo
-echo "Building uninstaller..."
 echo "Generating uninstall script..."
 cat >uninstaller/META-INF/com/google/android/updater-script <<-EOF
 	ui_print("mounting system");
@@ -320,9 +331,9 @@ cat >uninstaller/META-INF/com/google/android/updater-script <<-EOF
 	done
 	)$([[ -f uninstaller/init.qcom.post_boot.sh ]] && echo && \
 	echo 'package_extract_file("init.qcom.post_boot.sh", "/system/etc/init.qcom.post_boot.sh");'
-	)$([[ -d installer/system/xbin ]] && echo && \
-	echo "ui_print(\"cleaning xbin\");" && \
-	for f in installer/system/xbin
+	)$(ls installer/system/xbin/* &>/dev/null && echo && \
+	echo "ui_print(\"cleaning binaries\");" && \
+	for f in installer/system/xbin/*
 	do echo "delete(\"${f#installer}\");"
 	done
 	)
@@ -341,7 +352,7 @@ then
 	dhupargs=("${dhupargs[@]}" "$BDIR/uninstall-$NAME-$BD.zip" "$(eval echo "${DHDESC[2]}")")
 	for dev in "${DEVS[@]}"
 	do
-		if [[ "${STABLE[@]}" == *$dev* ]]
+		if [[ "${STABLE[@]}" == *"$dev"* ]]
 		then btype=release
 		else btype=testing
 		fi
