@@ -3,7 +3,7 @@ dkp-build:
 
 dkp-build is used to build dkp for 5 different d2 variants, but should be easily extensible to build many other single-source, multiple-device kernels.
 
-massbuild.sh is designed to build dkp as wastefully as possible.  All builds are done in separate kbuild trees and executed in parallel, so incremental rebuilds (which otherwise spend 75% of their time running a single-threaded linker or compressor) generally complete very quickly.  GNU make's questionable --load-average hampers this process slightly.
+massbuild.sh is designed to build dkp as wastefully as possible.  All builds are done in separate kbuild trees and executed in parallel, so incremental rebuilds (which otherwise spend 75% of their time running a single-threaded linker or compressor) generally complete very quickly.
 
 Notable features:
 -----------------
@@ -32,6 +32,11 @@ Usage:
 Try ./massbuild.sh --help.  My typical usage is "./massbuild.sh -f d2spr" until everything works, then "./massbuild.sh -l -r -u" to publish a new release with a fresh Linaro toolchain.
 
 Note that massbuild.sh is sort of stupid, and doesn't understand combined short parameters (eg. -lru).
+
+Limitations:
+------------
+
+Currently, only one initramfs is generated, which is shared across all devices.  This works on d2, but other device families may need per-device ramdisks.
 
 Included binaries:
 ------------------
