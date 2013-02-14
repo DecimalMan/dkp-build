@@ -32,55 +32,16 @@ DHDESC=('$NAME $(date +%x) release for $dev' '$NAME test build for $dev' '$NAME 
 DEVS=()
 export CROSS_COMPILE=../android-toolchain-eabi/bin/arm-eabi-
 
-# Use the make jobserver to sort out building everything
-# oldconfig is a huge pain, since it won't run with multiple jobs, needs
-# defconfig to run first and needs stdin.  Still, it's nice to have.
-kba() {
-	KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\""
-	if $OC
-	then mj=
-	else mj="-j $(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
-	fi
-	if ! make $mj "${DEVS[@]}" -f <(cat <<EOF
-%:
-	@mkdir -p "kbuild-\$@"
-	@rm -f "massbuild-\$@.log"
-	$($CL && \
-	echo "@echo Cleaning \$@..." && \
-	echo "$KB clean >>\"massbuild-\$@.log\" 2>&1"
-	)$($CF && \
-	echo && \
-	echo "	@echo Making ${CFGFMT}..." && \
-	echo "$KB $CFGFMT >>\"massbuild-\$@.log\" 2>&1"
-	)$($OC && \
-	echo && \
-	echo "	@echo Making oldconfig for \$@..." && \
-	echo "$KB -s oldconfig 2>\"massbuild-\$@.log\""
-	)$(! $OC && \
-	echo && \
-	echo "	@echo Making all for \$@..." && \
-	echo "$KB $* >>\"massbuild-\$@.log\" 2>&1"
-	)
-EOF
-)
-	then
-		echo
-		echo "Some builds failed.  Their logs are available in ${PWD}."
-		false
-	fi
-	if $OC
-	then
-		echo
-		echo "Configuration finished.  Please restart without --oldconfig to build."
-		false
-	fi
-}
-
 # Upload to Dev-Host.  This could be done better, but I <3 sed.
 dhup() {
 	(( $# > 2 && $# % 2 == 0 ))
-	. ./devhostauth.sh
-	[[ "$DHUSER" && "$DHPASS" ]]
+	[[ -r devhostauth.sh ]] && . ./devhostauth.sh || true
+	if ! [[ "$DHUSER" && "$DHPASS" ]]
+	then
+		read -p 'Dev-Host username: ' DHUSER
+		read -s -p 'Dev-Host password: ' DHPASS
+		echo
+	fi
 	# Sign in.  Resulting page isn't useful.
 	echo "Logging in as $DHUSER..."
 	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o /dev/null d-h.st)"
@@ -134,7 +95,7 @@ do
 			-c (--config): make each device's defconfig before building
 			-C (--clean): make clean for each device before building
 			-f (--flash): automagically flash
-			-l (--linaro): upgrade Linaro toolchain ($PWD/android-toolchain-eabi), implies -C
+			-l (--linaro): upgrade Linaro toolchain ($(dirname "$0")/android-toolchain-eabi), implies -C
 			-n (--no-package): just build, don't package
 			-o (--oldconfig): make oldconfig for each device before building
 			-r (--release): package builds for release; generate uninstaller
@@ -205,10 +166,55 @@ then
 	echo
 fi
 
-# Build!
-kba
+# Use the make jobserver to sort out building everything
+# oldconfig is a huge pain, since it won't run with multiple jobs, needs
+# defconfig to run first and needs stdin.  Still, it's nice to have.
+KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\""
+if $OC
+then mj=
+else mj="-j $(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
+fi
+if ! make $mj "${DEVS[@]}" -f <(cat <<EOF
+${DEVS[@]}:
+	@mkdir -p "kbuild-\$@"
+	@rm -f "massbuild-\$@.log"
+	$($CL && \
+	echo "@echo Cleaning \$@..." && \
+	echo "$KB clean >>\"massbuild-\$@.log\" 2>&1"
+	)$($CF && \
+	echo && \
+	echo "	@echo Making ${CFGFMT}..." && \
+	echo "$KB $CFGFMT >>\"massbuild-\$@.log\" 2>&1"
+	)$($OC && \
+	echo && \
+	echo "	@echo Making oldconfig for \$@..." && \
+	echo "$KB -s oldconfig 2>\"massbuild-\$@.log\""
+	)$(! $OC && \
+	echo && \
+	echo "	@echo Making all for \$@..." && \
+	echo "$KB $* >>\"massbuild-\$@.log\" 2>&1"
+	)
+.PHONY: ${DEVS[@]}
+EOF
+)
+then
+	echo
+	echo "Some builds failed.  Logs are saved as '$(dirname "$0")/massbuild-<device>.log'."
+	false
+fi
+if $OC
+then
+	echo
+	echo "Configuration finished.  Please restart without --oldconfig to build."
+	exit 0
+fi
+if ! $PKG
+then
+	echo
+	echo "Building finished.  Not packaging."
+	exit 0
+fi
 
-$PKG || exit 0
 echo
 echo "Packaging $NAME..."
 mkdir -p "$BDIR"

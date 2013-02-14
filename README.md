@@ -1,9 +1,9 @@
 dkp-build:
 ==========
 
-dkp-build is used to build dkp for 5 different d2 variants, but should be easily extensible to build many other single-source, multiple-device kernels.
+dkp-build is used to build dkp for five different d2 variants, but should be easily extensible to build many other single-source, multiple-device kernels.
 
-massbuild.sh is designed to build dkp as wastefully as possible.  All builds are done in separate kbuild trees and executed in parallel, so incremental rebuilds (which otherwise spend 75% of their time running a single-threaded linker or compressor) generally complete very quickly.
+massbuild.sh is designed to build dkp as wastefully as possible.  All builds are done in separate kbuild trees and executed in parallel, so incremental rebuilds (which otherwise spend 75% of their time running a single-threaded linker or compressor) generally complete very quickly.  The downside is that each kbuild tree takes up several hundred MB.
 
 Notable features:
 -----------------
@@ -20,16 +20,16 @@ Configuration:
 
 A number of options are available at the top of massbuild.sh.  It should be possible to reuse massbuild.sh for other kernels without changing anything beyond these settings.
 
-In order to upload to Dev-Host, massbuild.sh expects devhostauth.sh to be created, containing:
+When uploading to Dev-Host, massbuild.sh will ask for a username and password.  To avoid being prompted every time, create (and ```chmod 600```!) a file "devhostauth.sh" containing:
 ```sh
-DHUSER=(username)
-DHPASS=(password)
+DHUSER=username
+DHPASS=password
 ```
 
 Usage:
 ------
 
-Try ./massbuild.sh --help.  My typical usage is "./massbuild.sh -f d2spr" until everything works, then "./massbuild.sh -l -r -u" to publish a new release with a fresh Linaro toolchain.
+Try ```./massbuild.sh --help```.  My typical usage is ```./massbuild.sh -f d2spr``` until everything works, then ```./massbuild.sh -l -r -u``` to publish a new release with a fresh Linaro toolchain.
 
 Note that massbuild.sh is sort of stupid, and doesn't understand combined short parameters (eg. -lru).
 
