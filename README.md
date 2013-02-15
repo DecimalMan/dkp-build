@@ -3,17 +3,17 @@ dkp-build:
 
 dkp-build is used to build dkp for five different d2 variants, but should be easily extensible to build many other single-source, multiple-device kernels.
 
-massbuild.sh is designed to build dkp as wastefully as possible.  All builds are done in separate kbuild trees and executed in parallel, so incremental rebuilds (which otherwise spend 75% of their time running a single-threaded linker or compressor) generally complete very quickly.  The downside is that each kbuild tree takes up several hundred MB.
+massbuild.sh is designed to build dkp as wastefully as possible (between source, .git, toolchain and intermediates, my build directory is up to 3GB).  All devices are built out-of-tree into their own directories, facilitating incremental rebuilds for multiple devices.  This also allows parallel building, avoiding stalling during the long single-threaded linking and compression steps.
 
 Notable features:
 -----------------
 
-- Automatic versioning of builds
-- Automatic generation of install & uninstall zips
 - Fast multi-device rebuilds, thanks to multiple out-of-tree build directories
-- Easy updates to the Linaro nightly toolchain
+- Automatic generation of install & uninstall zips, with automatic handling of xbin and initscripts
 - Automatic flashing to an attached device
+- Automatic versioning of builds
 - Automatic uploading to Dev-Host
+- Easy updates to the Linaro nightly toolchain
 
 Configuration:
 --------------
@@ -29,12 +29,14 @@ DHPASS=password
 Usage:
 ------
 
-Try ```./massbuild.sh --help```.  My typical usage is ```./massbuild.sh -f d2spr``` until everything works, then ```./massbuild.sh -l -r -u``` to publish a new release with a fresh Linaro toolchain.
+Try ```./massbuild.sh --help```.  My typical usage is ```./massbuild.sh -f d2spr``` until everything works, then ```./massbuild.sh -lru``` to publish a new release with a fresh Linaro toolchain.
 
-Limitations:
+Limitations/TODO:
 ------------
 
 Currently, only one initramfs and updater-script is generated, which is shared across all devices.  This works on d2, but other device families may need per-device ramdisks or installers.
+
+Built packages and the ramdisk are generated outside of make, and are not run in parallel.
 
 Included binaries:
 ------------------

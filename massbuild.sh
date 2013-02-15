@@ -9,7 +9,7 @@ RNAME=dkp
 ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD)"
 # Devices available to build for
 ALLDEVS=(d2att d2cri d2spr d2usc d2vzw)
-# Devices that will be be marked 'release'
+# Devices that will be be marked 'release' rather than 'testing'
 STABLE=(d2spr)
 # defconfig format, will be expanded per-device
 CFGFMT='cyanogen_$@_defconfig'
@@ -20,16 +20,16 @@ RDSRC=../../cm101/out/target/product/d2spr/root
 BOOTCLI='console = null androidboot.hardware=qcom user_debug=31 zcache'
 BOOTARGS='--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01900000'
 
-# Where to push flashable builds to (internal/external "SD" card)
+# Where to push flashable builds to (internal/external storage)
 FLASH=external
 
-# Dev-Host upload configs as (release_val experimental_val)
+# Dev-Host upload configs as ('release_val' 'experimental_val')
 # DHUSER and DHPASS should be set in devhostauth.sh
 # Upload directory, must already exist
 DHDIRS=(/DKP /DKP-WIP)
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
-# Upload description (release experimental uninstaller)
+# Upload description ('release' 'experimental' 'uninstaller')
 DHDESC=('$NAME $(date +%x) release for $dev' '$NAME test build for $dev' '$NAME $(date +%x) uninstaller')
 
 ###  END OF CONFIGURABLES  ###
@@ -64,7 +64,7 @@ do
 	(r|--release) EXP=false;;
 	(R|--ramdisk) RD=true;;
 	(u|--upload) DH=true;;
-	(-*);;
+	(-[^-]*);;
 	(*) 	if [[ "${ALLDEVS[*]}" == *"$v"* ]]
 		then DEVS=("${DEVS[@]}" "$v")
 		else
@@ -133,6 +133,7 @@ then
 	esac
 	flashdir="$(adb -d shell ls -d "${flashdirs[@]}" | sed 's/[^[:print:]]//g' | \
 		grep -v 'No such file or directory')"
+	[[ "$flashdir" ]] || { echo "Can't find device's $FLASH storage!"; exit 1; }
 fi
 
 # Update Linaro?
@@ -164,8 +165,9 @@ fi
 # defconfig to run first and needs stdin.  Still, it's nice to have.
 KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\""
 # Explicitly use GNU make when available.
-M="$(which gmake 2>&-)" || M="$(which make 2>&-)"
-"$M" -v 2>&- | grep -q GNU || echo "GNU make not found.  Expect problems."
+M="$(which gmake make 2>&- | head -n 1)" || true
+[[ "$M" ]] || { echo "make not found.  Can't build."; exit 1; }
+"$M" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
 if $OC
 then mj=
 else mj="-j $(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
