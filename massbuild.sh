@@ -316,14 +316,15 @@ then
 		dha=()
 		dhidx=1
 	else
-		dha=(-F "files[]=$BDIR/uninstall-$NAME-$BD.zip" \
+		dha=(-F "files[]=@$BDIR/uninstall-$NAME-$BD.zip" \
 			-F "file_description[]=$(eval echo "${DHDESC[2]}")")
 		dhidx=0
 	fi
 	for dev in "${DEVS[@]}"
 	do
 		gbt "$dev"
-		dha=("${dha[@]}" -F "$BDIR/$NAME-$btype-$dev-$BD.zip" -F "$(eval echo "${DHDESC[$dhidx]}")")
+		dha=("${dha[@]}" -F "files[]=@$BDIR/$NAME-$btype-$dev-$BD.zip" \
+			-F "file_description[]=$(eval echo "${DHDESC[$dhidx]}")")
 	done
 	[[ -r devhostauth.sh ]] && . ./devhostauth.sh || true
 	if ! [[ "$DHUSER" && "$DHPASS" ]]
