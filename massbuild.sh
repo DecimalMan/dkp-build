@@ -110,6 +110,7 @@ do
 			exit 1
 		fi
 	esac
+	# Can't use getopt since BSD's sucks.
 	if ! getopts "cCflnorRu" v "$1"
 	then
 		shift
@@ -133,8 +134,9 @@ fi
 if $FL
 then
 	echo "Checking device to be flashed..."
-	adb start-server >/dev/null 2>&1
-	adb -d shell : >/dev/null
+	adb start-server &>/dev/null
+	adb -d shell : >&-
+	# Note to Google: unices don't like CRLF.
 	flashdev="$(adb -d shell getprop ro.product.device | sed 's/[^[:print:]]//g')"
 	[[ "$flashdev" == *"getprop: not found" ]] && \
 	flashdev="$(adb -d shell sed -n '/^ro.product.device/ { s/.*=//; p; }' /default.prop | \
@@ -182,30 +184,33 @@ fi
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
 KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\""
+# Explicitly use GNU make when available.
+M="$(which gmake 2>&-)" || M="$(which make 2>&-)"
+"$M" -v 2>&- | grep -q GNU || echo "GNU make not found.  Expect problems."
 if $OC
 then mj=
 else mj="-j $(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
 fi
-if ! make $mj "${DEVS[@]}" -k -f <(cat <<EOF
+if ! "$M" $mj "${DEVS[@]}" -k -f <(cat <<EOF
 ${DEVS[@]}:
 	@mkdir -p "kbuild-\$@"
 	@touch "build-failed-\$@"
 	@rm -f "massbuild-\$@.log"
 	$($CL && \
 	echo "@echo Cleaning \$@..." && \
-	echo "$KB clean >>\"massbuild-\$@.log\" 2>&1"
+	echo "$KB clean &>>\"massbuild-\$@.log\""
 	)$($CF && \
 	echo && \
 	echo "	@echo Making ${CFGFMT}..." && \
-	echo "$KB $CFGFMT >>\"massbuild-\$@.log\" 2>&1"
+	echo "$KB $CFGFMT &>>\"massbuild-\$@.log\""
 	)$($OC && \
 	echo && \
 	echo "	@echo Making oldconfig for \$@..." && \
-	echo "$KB -s oldconfig 2>\"massbuild-\$@.log\""
+	echo "$KB -s oldconfig 2>>\"massbuild-\$@.log\""
 	)$(! $OC && \
 	echo && \
 	echo "	@echo Making all for \$@..." && \
-	echo "$KB $* >>\"massbuild-\$@.log\" 2>&1"
+	echo "$KB $* &>>\"massbuild-\$@.log\""
 	)
 	@rm -f "build-failed-\$@"
 	@echo "Finished building \$@."
@@ -295,7 +300,7 @@ then
 			adb -d push "$BDIR/$NAME-$btype-$flashdev-$BD.zip" \
 				"$flashdir/massbuild/$NAME-$btype-$flashdev-$BD.zip"
 			echo "Generating OpenRecoveryScript..."
-			adb -d shell "e='echo \"install massbuild/$NAME-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'; su -c \"\$e\" || eval \"\$e\"" >/dev/null 2>&1
+			adb -d shell "e='echo \"install massbuild/$NAME-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'; su -c \"\$e\" || eval \"\$e\"" &>/dev/null
 			echo "Rebooting to recovery..."
 			adb -d reboot recovery
 		fi
