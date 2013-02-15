@@ -5,19 +5,21 @@
 # Kernel source location, relative to massbuild.sh
 KSRC=../android_kernel_samsung_d2
 # Kernel name used for filenames
-#NAME=dkp
-NAME="$(cd "$KSRC" && git symbolic-ref --short HEAD)"
+RNAME=dkp
+ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD)"
 # Devices available to build for
 ALLDEVS=(d2att d2cri d2spr d2usc d2vzw)
 # Devices that will be be marked 'release'
 STABLE=(d2spr)
-# Ramdisk source, relative to massbuild.sh
-RDSRC=../../cm101/out/target/product/d2spr/root
-# boot.img command line and arguments.
-BOOTCLI='console = null androidboot.hardware=qcom user_debug=31 zcache'
-BOOTARGS='--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01900000'
 # defconfig format, will be expanded per-device
 CFGFMT='cyanogen_$@_defconfig'
+
+# Ramdisk source, relative to massbuild.sh
+RDSRC=../../cm101/out/target/product/d2spr/root
+# boot.img kernel command line and arguments.
+BOOTCLI='console = null androidboot.hardware=qcom user_debug=31 zcache'
+BOOTARGS='--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01900000'
+
 # Where to push flashable builds to (internal/external "SD" card)
 FLASH=external
 
@@ -35,35 +37,8 @@ DHDESC=('$NAME $(date +%x) release for $dev' '$NAME test build for $dev' '$NAME 
 DEVS=()
 export CROSS_COMPILE=../android-toolchain-eabi/bin/arm-eabi-
 
-# Upload to Dev-Host.  This could be done better, but I <3 sed.
-dhup() {
-	(( $# > 2 && $# % 2 == 0 ))
-	[[ -r devhostauth.sh ]] && . ./devhostauth.sh || true
-	if ! [[ "$DHUSER" && "$DHPASS" ]]
-	then
-		read -p 'Dev-Host username: ' DHUSER
-		read -s -p 'Dev-Host password: ' DHPASS
-		echo
-	fi
-	# Sign in.  Resulting page isn't useful.
-	echo "Logging in as $DHUSER..."
-	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o /dev/null d-h.st)"
-	# Fetch signed-in upload page.
-	html="$(curl -s -b <(echo "$cookies") d-h.st)"
-	# Look up directory id
-	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${1//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")"
-	# Look up form action (i.e. URL)
-	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")"
-	# Guess userid from cookie instead of looking it up
-	userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")"
-	dhpub="$2"
-	shift 2
-	dhargs=()
-	while [[ "$1" ]]; do dhargs=("${dhargs[@]}" -F "files[]=@$1" -F "file_description[]=$2"); shift 2; done
-	# pull upload_id from action instead of looking it up
-	echo "Uploading..."
-	curl -F "UPLOAD_IDENTIFIER=${action##*=}" -F "action=upload" -F "uploadfolder=$dirid" -F "public=$dhpub" -F "user_id=$userid" "${dhargs[@]}" -b <(echo "$cookies") "$action" -o /dev/null
-}
+askyn() { echo; read -n 1 -p "$@ "; echo; [[ "$REPLY" == [Yy] ]]; }
+gbt() { $EXP && btype="experimental" || [[ "${STABLE[*]}" == *"$1"* ]] && btype="release" || btype="testing"; }
 
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -82,7 +57,7 @@ do
 	case "$v" in
 	(c|--config) CF=true;;
 	(C|--clean) CL=true;;
-	(f|--flash) FL=true; EXP=true;;
+	(f|--flash) FL=true;;
 	(l|--linaro) GL=true;;
 	(n|--no-package) PKG=false;;
 	(o|--oldconfig) OC=true;;
@@ -122,15 +97,19 @@ done
 # Make sure we have devices to build
 [[ "${DEVS[*]}" ]] || DEVS=("${ALLDEVS[@]}")
 
+# Use a more informative naming scheme for experimental builds
 if $EXP
 then
 	BD="$(date +%s)"
 	BDIR="out/experimental"
+	NAME="$ENAME"
 else
 	BD="$(date +%Y%m%d)"
 	BDIR="out/release-$BD"
+	NAME="$RNAME"
 fi
 
+# Sanity-check the device to be flashed
 if $FL
 then
 	echo "Checking device to be flashed..."
@@ -201,7 +180,7 @@ ${DEVS[@]}:
 	echo "$KB clean &>>\"massbuild-\$@.log\""
 	)$($CF && \
 	echo && \
-	echo "	@echo Making ${CFGFMT}..." && \
+	echo "	@echo Making $CFGFMT..." && \
 	echo "$KB $CFGFMT &>>\"massbuild-\$@.log\""
 	)$($OC && \
 	echo && \
@@ -218,16 +197,14 @@ ${DEVS[@]}:
 EOF
 )
 then
-	echo
-	read -n 1 -p 'Some builds failed.  Read build logs? '
-	echo
-	[[ "$REPLY" == [Yy] ]] && \
+	askyn "Some builds failed.  Read build logs?" && \
 		less $(ls build-failed-* | \
 		sed -n 's/build-failed-\(d2[a-z]\{3\}\)/massbuild-\1.log/; T; p')
 	rm -f build-failed-*
 	false
 fi
 
+# Break here if needed.
 (n=
 $OC && n="Finished configuration.  Please restart without --oldconfig to build." || true
 $PKG || n="Finished building.  Packaging disabled by --no-package."
@@ -236,8 +213,10 @@ echo
 echo "$n"
 false) || exit 0
 
-echo
+# Package everything.  It would be nice to do this inside make, but that would
+# require per-device packaging directories.
 mkdir -p "$BDIR"
+echo
 echo "Generating install script..."
 cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	ui_print("mounting system");
@@ -270,12 +249,7 @@ do
 		--output "installer/boot.img"
 	rm -f installer/system/lib/modules/*
 	find "kbuild-$dev" -name '*.ko' -exec cp '{}' installer/system/lib/modules ';'
-	if $EXP
-	then btype=experimental
-	elif [[ "${STABLE[@]}" == *"$dev"* ]]
-	then btype=release
-	else btype=testing
-	fi
+	gbt "$dev"
 	rm -f "$BDIR/$NAME-$btype-$dev-$BD.zip"
 	(cd installer && zip -qr "../$BDIR/$NAME-$btype-$dev-$BD.zip" *)
 	echo "Created $BDIR/$NAME-$btype-$dev-$BD.zip"
@@ -283,85 +257,86 @@ done
 
 if $EXP
 then
-	echo
-	read -n 1 -p 'Review build logs? '
-	echo
-	[[ "$REPLY" == [Yy] ]] && \
+	askyn "Review build logs?" && \
 		less $(sed 's/\(^\| \)\([^ ]*\)/massbuild-\2.log /g' <<<"${DEVS[*]}")
-	if $FL
-	then
-		read -n 1 -p 'Flash to device? '
-		echo
-		if [[ "$REPLY" == [Yy] ]]
-		then
-			# adb always returns 0, which sucks.
-			adb -d shell "mkdir -p \"$flashdir/massbuild/\""
-			echo "Pushing $NAME-$btype-$flashdev-$BD.zip..."
-			adb -d push "$BDIR/$NAME-$btype-$flashdev-$BD.zip" \
-				"$flashdir/massbuild/$NAME-$btype-$flashdev-$BD.zip"
-			echo "Generating OpenRecoveryScript..."
-			adb -d shell "e='echo \"install massbuild/$NAME-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'; su -c \"\$e\" || eval \"\$e\"" &>/dev/null
-			echo "Rebooting to recovery..."
-			adb -d reboot recovery
-		fi
-	fi
-	if $DH
-	then
-		read -n 1 -p 'Upload to Dev-Host? '
-		echo
-		if [[ "$REPLY" == [Yy] ]]
-		then
-			dhupargs=()
-			for dev in "${DEVS[@]}"
-			do
-				dhupargs=("${dhupargs[@]}" "$BDIR/$NAME-$btype-$dev-$BD.zip" "$(eval echo "${DHDESC[1]}")")
-			done
-			dhup "${DHDIRS[1]}" "${DHPUB[1]}" "${dhupargs[@]}"
-		fi
-	fi
-	exit 0
+else
+	echo "Generating uninstall script..."
+	cat >uninstaller/META-INF/com/google/android/updater-script <<-EOF
+		ui_print("mounting system");
+		run_program("/sbin/busybox", "mount", "/system");
+		ui_print("cleaning modules");
+		$(for f in installer/system/lib/modules/*
+		do echo "delete(\"${f#installer}\");"
+		done)
+		ui_print("cleaning initscripts");
+		$(for f in installer/system/etc/init.d/*
+		do echo "delete(\"${f#installer}\");"
+		done
+		)$([[ -f uninstaller/init.qcom.post_boot.sh ]] && echo && \
+		echo 'package_extract_file("init.qcom.post_boot.sh", "/system/etc/init.qcom.post_boot.sh");'
+		)$(ls installer/system/xbin/* &>/dev/null && echo && \
+		echo "ui_print(\"cleaning binaries\");" && \
+		for f in installer/system/xbin/*
+		do echo "delete(\"${f#installer}\");"
+		done
+		)
+		set_perm(0, 0, 0755, "/system/etc/init.qcom.post_boot.sh");
+		ui_print("unmounting system");
+		run_program("/sbin/busybox", "umount", "/system");
+	EOF
+	echo "Packaging uninstaller..."
+	rm -f "$BDIR/uninstall-$NAME-$BD.zip"
+	(cd uninstaller && zip -qr "../$BDIR/uninstall-$NAME-$BD.zip" *)
+	echo "Created $BDIR/uninstall-$NAME-$BD.zip"
 fi
 
-echo "Generating uninstall script..."
-cat >uninstaller/META-INF/com/google/android/updater-script <<-EOF
-	ui_print("mounting system");
-	run_program("/sbin/busybox", "mount", "/system");
-	ui_print("cleaning modules");
-	$(for f in installer/system/lib/modules/*
-	do echo "delete(\"${f#installer}\");"
-	done)
-	ui_print("cleaning initscripts");
-	$(for f in installer/system/etc/init.d/*
-	do echo "delete(\"${f#installer}\");"
-	done
-	)$([[ -f uninstaller/init.qcom.post_boot.sh ]] && echo && \
-	echo 'package_extract_file("init.qcom.post_boot.sh", "/system/etc/init.qcom.post_boot.sh");'
-	)$(ls installer/system/xbin/* &>/dev/null && echo && \
-	echo "ui_print(\"cleaning binaries\");" && \
-	for f in installer/system/xbin/*
-	do echo "delete(\"${f#installer}\");"
-	done
-	)
-	set_perm(0, 0, 0755, "/system/etc/init.qcom.post_boot.sh");
-	ui_print("unmounting system");
-	run_program("/sbin/busybox", "umount", "/system");
-EOF
-echo "Packaging uninstaller..."
-rm -f "$BDIR/uninstall-$NAME-$BD.zip"
-(cd uninstaller && zip -qr "../$BDIR/uninstall-$NAME-$BD.zip" *)
-echo "Created $BDIR/uninstall-$NAME-$BD.zip"
+if $FL
+then
+	if askyn "Flash to device?"
+	then
+		gbt "$dev"
+		# adb always returns 0, which sucks.
+		adb -d shell "mkdir -p \"$flashdir/massbuild/\""
+		echo "Pushing $NAME-$btype-$flashdev-$BD.zip..."
+		adb -d push "$BDIR/$NAME-$btype-$flashdev-$BD.zip" \
+			"$flashdir/massbuild/$NAME-$btype-$flashdev-$BD.zip"
+		echo "Generating OpenRecoveryScript..."
+		adb -d shell "e='echo \"install massbuild/$NAME-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'; su -c \"\$e\" || eval \"\$e\"" &>/dev/null
+		echo "Rebooting to recovery..."
+		adb -d reboot recovery
+	fi
+fi
 
 if $DH
 then
 	echo
-	dhupargs=("${dhupargs[@]}" "$BDIR/uninstall-$NAME-$BD.zip" "$(eval echo "${DHDESC[2]}")")
+	if $EXP
+	then
+		askyn "Upload to Dev-Host?" || exit 0
+		dha=()
+		dhidx=1
+	else
+		dha=(-F "files[]=$BDIR/uninstall-$NAME-$BD.zip" \
+			-F "file_description[]=$(eval echo "${DHDESC[2]}")")
+		dhidx=0
+	fi
 	for dev in "${DEVS[@]}"
 	do
-		if [[ "${STABLE[@]}" == *"$dev"* ]]
-		then btype=release
-		else btype=testing
-		fi
-		dhupargs=("${dhupargs[@]}" "$BDIR/$NAME-$btype-$dev-$BD.zip" "$(eval echo "${DHDESC[0]}")")
+		gbt "$dev"
+		dha=("${dha[@]}" -F "$BDIR/$NAME-$btype-$dev-$BD.zip" -F "$(eval echo "${DHDESC[$dhidx]}")")
 	done
-	dhup "${DHDIRS[0]}" "${DHPUB[0]}" "${dhupargs[@]}"
+	[[ -r devhostauth.sh ]] && . ./devhostauth.sh || true
+	if ! [[ "$DHUSER" && "$DHPASS" ]]
+	then
+		read -p 'Dev-Host username: ' DHUSER
+		read -s -p 'Dev-Host password: ' DHPASS
+		echo
+	fi
+	echo "Logging in as $DHUSER..."
+	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o /dev/null d-h.st)"
+	html="$(curl -s -b <(echo "$cookies") d-h.st)"
+	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${DHDIRS[$dhidx]//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")"
+	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")"
+	userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")"
+	curl -F "UPLOAD_IDENTIFIER=${action##*=}" -F "action=upload" -F "uploadfolder=$dirid" -F "public=${DHPUB[$dhidx]}" -F "user_id=$userid" "${dha[@]}" -b <(echo "$cookies") "$action" -o /dev/null
 fi
