@@ -37,8 +37,8 @@ DHDESC=('$NAME $(date +%x) release for $dev' '$NAME test build for $dev' '$NAME 
 DEVS=()
 export CROSS_COMPILE=../android-toolchain-eabi/bin/arm-eabi-
 
-askyn() { echo; read -n 1 -p "$@ "; echo; [[ "$REPLY" == [Yy] ]]; }
-gbt() { $EXP && btype="experimental" || [[ "${STABLE[*]}" == *"$1"* ]] && btype="release" || btype="testing"; }
+askyn() { echo; read -n 1 -p "$* "; echo; [[ "$REPLY" == [Yy] ]]; }
+gbt() { { $EXP && btype="experimental"; } || { [[ "${STABLE[*]}" == *"$1"* ]] && btype="release"; } || btype="testing"; }
 
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -51,6 +51,7 @@ PKG=true
 FL=false
 DH=false
 OC=false
+octgt=oldconfig
 v="$1"
 while [[ "$v" ]]
 do
@@ -60,7 +61,8 @@ do
 	(f|--flash) FL=true;;
 	(l|--linaro) GL=true;;
 	(n|--no-package) PKG=false;;
-	(o|--oldconfig) OC=true;;
+	(o|--oldconfig) OC=true; [[ "$2" == *config && "$2" != --config ]] && \
+		{ octgt="$2"; s="$1"; shift 2; set -- "$s" "$@"; };;
 	(r|--release) EXP=false;;
 	(R|--ramdisk) RD=true;;
 	(u|--upload) DH=true;;
@@ -177,7 +179,7 @@ ${DEVS[@]}:
 	@mkdir -p "kbuild-\$@"
 	@touch "build-failed-\$@"
 	@rm -f "massbuild-\$@.log"
-	$($CL && \
+	$({ $CL || $GL; } && \
 	echo "@echo Cleaning \$@..." && \
 	echo "$KB clean &>>\"massbuild-\$@.log\""
 	)$($CF && \
@@ -186,12 +188,14 @@ ${DEVS[@]}:
 	echo "$KB $CFGFMT &>>\"massbuild-\$@.log\""
 	)$($OC && \
 	echo && \
-	echo "	@echo Making oldconfig for \$@..." && \
-	echo "$KB -s oldconfig 2>>\"massbuild-\$@.log\""
+	echo "	@echo Making $octgt for \$@..." && \
+	echo "$KB -s $octgt 2>>\"massbuild-\$@.log\""
 	)$(! $OC && \
 	echo && \
 	echo "	@echo Making all for \$@..." && \
-	echo "$KB $* &>>\"massbuild-\$@.log\""
+	echo "$KB $* &>>\"massbuild-\$@.log\"" && \
+	echo "	@echo Stripping modules..." && \
+	echo "	@find \"kbuild-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"massbuild-\$@.log\""
 	)
 	@rm -f "build-failed-\$@"
 	@echo "Finished building \$@."
