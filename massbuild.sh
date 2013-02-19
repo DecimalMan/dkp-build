@@ -50,19 +50,21 @@ EXP=true
 PKG=true
 FL=false
 DH=false
-OC=false
-octgt=oldconfig
+cfg=
 v="$1"
 while [[ "$v" ]]
 do
 	case "$v" in
-	(c|--config) CF=true;;
+	(c|--config)
+		CF=true
+		# If next arg is a valid kconfig target, assume it requires
+		# serial make and stdin/stdout.
+		[[ "$2" != -* ]] && grep -q "^$2:" "$KSRC/scripts/kconfig/Makefile" 2>&- && \
+		{ cfg="$2"; s="$1"; shift 2; set -- "$s" "$@"; };;
 	(C|--clean) CL=true;;
 	(f|--flash) FL=true;;
 	(l|--linaro) GL=true;;
 	(n|--no-package) PKG=false;;
-	(o|--oldconfig) OC=true; [[ "$2" == *config && "$2" != --config ]] && \
-		{ octgt="$2"; s="$1"; shift 2; set -- "$s" "$@"; };;
 	(r|--release) EXP=false;;
 	(R|--ramdisk) RD=true;;
 	(u|--upload) DH=true;;
@@ -74,12 +76,11 @@ do
 			Usage: $0 [options] [devices]
 			Devices: ${ALLDEVS[*]} (edit $0 to update list)
 			Options:
-			-c (--config): make each device's defconfig before building
+			-c (--config) [<target>]: configure each device before building
 			-C (--clean): make clean for each device before building
 			-f (--flash): automagically flash
 			-l (--linaro): upgrade Linaro toolchain ($(dirname "$0")/android-toolchain-eabi), implies -C
 			-n (--no-package): just build, don't package
-			-o (--oldconfig): make oldconfig for each device before building
 			-r (--release): package builds for release; generate uninstaller
 			-R (--ramdisk): regenerate ramdisk from built Android sources
 			-u (--upload): upload builds to Dev-Host
@@ -88,7 +89,7 @@ do
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if ! getopts "cCflnorRu" v "$1"
+	if ! getopts "cCflnrRu" v "$1"
 	then
 		shift
 		v="$1"
@@ -170,7 +171,7 @@ KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\""
 M="$(which gmake make 2>&- | head -n 1)" || true
 [[ "$M" ]] || { echo "make not found.  Can't build."; exit 1; }
 "$M" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
-if $OC
+if [[ "$cfg" ]]
 then mj=
 else mj="-j $(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
 fi
@@ -184,17 +185,19 @@ ${DEVS[@]}:
 	echo "$KB clean &>>\"massbuild-\$@.log\""
 	)$($CF && \
 	echo && \
-	echo "	@echo Making $CFGFMT..." && \
-	echo "$KB $CFGFMT &>>\"massbuild-\$@.log\""
-	)$($OC && \
-	echo && \
-	echo "	@echo Making $octgt for \$@..." && \
-	echo "$KB -s $octgt 2>>\"massbuild-\$@.log\""
-	)$(! $OC && \
+	if [[ "$cfg" ]]
+	then
+		echo "	@echo Making $cfg for \$@..." && \
+		echo "$KB -s $cfg 2>>\"massbuild-\$@.log\""
+	else
+		echo "	@echo Making $CFGFMT..." && \
+		echo "$KB $CFGFMT &>>\"massbuild-\$@.log\""
+	fi
+	)$(! [[ "$cfg" ]] && \
 	echo && \
 	echo "	@echo Making all for \$@..." && \
 	echo "$KB $* &>>\"massbuild-\$@.log\"" && \
-	echo "	@echo Stripping modules..." && \
+	echo "	@echo Stripping \$@ modules..." && \
 	echo "	@find \"kbuild-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"massbuild-\$@.log\""
 	)
 	@rm -f "build-failed-\$@"
@@ -211,13 +214,10 @@ then
 fi
 
 # Break here if needed.
-(n=
-$OC && n="Finished configuration.  Please restart without --oldconfig to build." || true
-$PKG || n="Finished building.  Packaging disabled by --no-package."
-[[ "$n" ]] || exit 0
-echo
-echo "$n"
-false) || exit 0
+msg=
+[[ "$cfg" ]] && msg="Finished configuration.  Restart without --config to build." || true
+$PKG || msg="Finished building.  Packaging disabled by --no-package."
+[[ ! "$msg" ]] || { echo; echo "$msg"; exit 0; }
 
 # Package everything.  It would be nice to do this inside make, but that would
 # require per-device packaging directories.
