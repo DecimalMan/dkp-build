@@ -144,8 +144,13 @@ if $GL
 then
 	echo "Fetching latest Linaro nightly toolchain..."
 	mv android-toolchain-eabi{,.old}
-	curl "http://snapshots.linaro.org/android/~linaro-android/toolchain-4.7-bzr/lastSuccessful/android-toolchain-eabi-4.7-daily-linux-x86.tar.bz2" | tar xj
-	rm -Rf android-toolchain-eabi.old
+	if curl "http://snapshots.linaro.org/android/~linaro-android/toolchain-4.7-bzr/lastSuccessful/android-toolchain-eabi-4.7-daily-linux-x86.tar.bz2" | tar xj
+	then rm -Rf android-toolchain-eabi.old
+	else
+		echo "Fetch failed.  Restoring old toolchain..."
+		rm -Rf android-toolchain-eabi
+		mv android-toolchain-eabi{.old,}
+	fi
 	echo
 fi
 
