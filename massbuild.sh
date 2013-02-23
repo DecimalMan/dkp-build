@@ -6,7 +6,7 @@
 KSRC=../android_kernel_samsung_d2
 # Kernel name used for filenames
 RNAME=dkp
-ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD)"
+ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 # Devices available to build for
 ALLDEVS=(d2att d2cri d2spr d2usc d2vzw)
 # Devices that will be be marked 'release' rather than 'testing'
@@ -16,9 +16,10 @@ CFGFMT='cyanogen_$@_defconfig'
 
 # Ramdisk source, relative to massbuild.sh
 RDSRC=../../cm101/out/target/product/d2spr/root
-# boot.img kernel command line and arguments.
+# boot.img kernel command line and arguments.  Without STRICT_RWX,
+# ramdisk_offset can be reduced (CM uses 0x0130000).
 BOOTCLI='console = null androidboot.hardware=qcom user_debug=31 zcache'
-BOOTARGS='--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01900000'
+BOOTARGS='--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01500000'
 
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
@@ -26,7 +27,7 @@ FLASH=external
 # Dev-Host upload configs as ('release_val' 'experimental_val')
 # DHUSER and DHPASS should be set in devhostauth.sh
 # Upload directory, must already exist
-DHDIRS=(/DKP /DKP-WIP)
+DHDIRS=(/dkp /dkp-wip)
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
 # Upload description ('release' 'experimental' 'uninstaller')
@@ -39,6 +40,7 @@ export CROSS_COMPILE=../android-toolchain-eabi/bin/arm-eabi-
 
 askyn() { echo; read -n 1 -p "$* "; echo; [[ "$REPLY" == [Yy] ]]; }
 gbt() { { $EXP && btype="experimental"; } || { [[ "${STABLE[*]}" == *"$1"* ]] && btype="release"; } || btype="testing"; }
+die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
 
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -123,20 +125,18 @@ then
 	[[ "$flashdev" == *"getprop: not found" ]] && \
 	flashdev="$(adb -d shell sed -n '/^ro.product.device/ { s/.*=//; p; }' /default.prop | \
 	sed 's/[^[:print:]]//g')"
-	if [[ "${DEVS[*]}" != *"$flashdev"* ]]
-	then
-		echo "Not building for device to be flashed ($flashdev)!"
-		echo "Refusing to continue."
-		exit 1
-	fi
+	[[ "${DEVS[*]}" == *"$flashdev"* ]] || \
+		die 1 "Not building for device to be flashed ($flashdev)."
 	case "$FLASH" in
 	(internal) flashdirs=(/storage/sdcard0 /sdcard/0);;
 	(external) flashdirs=(/storage/sdcard1 /external_sd);;
-	(*) echo "FLASH must be 'internal' or 'external'"; exit 1;;
+	(*) die 1 "FLASH must be 'internal' or 'external'.";;
 	esac
 	flashdir="$(adb -d shell ls -d "${flashdirs[@]}" | sed 's/[^[:print:]]//g' | \
 		grep -v 'No such file or directory')"
-	[[ "$flashdir" ]] || { echo "Can't find device's $FLASH storage!"; exit 1; }
+	[[ "$flashdir" ]] || \
+		die 1 "Can't find device's $FLASH storage."
+	echo
 fi
 
 # Update Linaro?
@@ -169,7 +169,7 @@ fi
 KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\""
 # Explicitly use GNU make when available.
 M="$(which gmake make 2>&- | head -n 1)" || true
-[[ "$M" ]] || { echo "make not found.  Can't build."; exit 1; }
+[[ "$M" ]] || die 1 "make not found.  Can't build."
 "$M" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
 if [[ "$cfg" ]]
 then mj=
@@ -196,33 +196,32 @@ ${DEVS[@]}:
 	)$(! [[ "$cfg" ]] && \
 	echo && \
 	echo "	@echo Making all for \$@..." && \
-	echo "$KB $* &>>\"massbuild-\$@.log\"" && \
+	echo "	@rm -f \"kbuild-\$@/.version\"" && \
+	echo "$KB &>>\"massbuild-\$@.log\"" && \
 	echo "	@echo Stripping \$@ modules..." && \
-	echo "	@find \"kbuild-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"massbuild-\$@.log\""
+	echo "	@find \"kbuild-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"massbuild-\$@.log\"" && \
+	echo "	@echo \"Finished building \$@.\""
 	)
 	@rm -f "build-failed-\$@"
-	@echo "Finished building \$@."
 .PHONY: ${DEVS[@]}
 EOF
 )
 then
-	askyn "Some builds failed.  Read build logs?" && \
+	askyn "Review build logs for failed builds?" && \
 		less $(ls build-failed-* | \
 		sed -n 's/build-failed-\(d2[a-z]\{3\}\)/massbuild-\1.log/; T; p')
 	rm -f build-failed-*
-	false
+	die 1 "Building failed."
 fi
+echo
 
 # Break here if needed.
-msg=
-[[ "$cfg" ]] && msg="Finished configuration.  Restart without --config to build." || true
-$PKG || msg="Finished building.  Packaging disabled by --no-package."
-[[ ! "$msg" ]] || { echo; echo "$msg"; exit 0; }
+[[ "$cfg" ]] && die 0 "Restart without --config to build."
+$PKG || die 0 "Packaging disabled by --no-package."
 
 # Package everything.  It would be nice to do this inside make, but that would
 # require per-device packaging directories.
 mkdir -p "$BDIR"
-echo
 echo "Generating install script..."
 cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	ui_print("mounting system");
@@ -315,7 +314,6 @@ fi
 
 if $DH
 then
-	echo
 	if $EXP
 	then
 		askyn "Upload to Dev-Host?" || exit 0
@@ -340,10 +338,17 @@ then
 		echo
 	fi
 	echo "Logging in as $DHUSER..."
-	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o /dev/null d-h.st)"
-	html="$(curl -s -b <(echo "$cookies") d-h.st)"
-	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${DHDIRS[$dhidx]//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")"
-	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")"
-	userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")"
-	curl -F "UPLOAD_IDENTIFIER=${action##*=}" -F "action=upload" -F "uploadfolder=$dirid" -F "public=${DHPUB[$dhidx]}" -F "user_id=$userid" "${dha[@]}" -b <(echo "$cookies") "$action" -o /dev/null
+	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o /dev/null d-h.st)" || \
+		die 1 "Couldn't log in."
+	html="$(curl -s -b <(echo "$cookies") d-h.st)" || \
+		die 1 "Couldn't fetch upload page."
+	echo "$html" >devhost.html
+	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${DHDIRS[$dhidx]//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
+		die 1 "Couldn't find folder ${DHDIRS[$dhidx]}."
+	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
+		die 1 "Couldn't determine upload URL."
+	userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")" || \
+		die 1 "Couldn't determine user id."
+	curl -F "UPLOAD_IDENTIFIER=${action##*=}" -F "action=upload" -F "uploadfolder=$dirid" -F "public=${DHPUB[$dhidx]}" -F "user_id=$userid" "${dha[@]}" -b <(echo "$cookies") "$action" -o /dev/null || \
+		die 1 "Upload unsuccessful."
 fi
