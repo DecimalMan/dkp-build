@@ -31,7 +31,10 @@ DHDIRS=(/dkp /dkp-wip)
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
 # Upload description ('release' 'experimental' 'uninstaller')
-DHDESC=('$NAME $(date +%x) release for $dev' '$NAME test build for $dev' '$NAME $(date +%x) uninstaller')
+#DHDESC=('$NAME $(date +%x) release for $dev' '$NAME test build for $dev' '$NAME $(date +%x) uninstaller')
+DHDESC=('$RNAME $(date +%x) release for $dev' \
+'Who the heck is downloading these?  I never posted a link! :D' \
+'$RNAME $(date +%x) uninstaller')
 
 ###  END OF CONFIGURABLES  ###
 
@@ -155,16 +158,16 @@ then
 fi
 
 # Rebuild ramdisk?
-if $RD || ! [[ -f initramfs.gz ]]
+if $RD || ! [[ -f initramfs.xz ]]
 then
 	echo "Rebuilding initramfs..."
 	rdtmp="$(mktemp -d 'initramfs.XXXXXX')"
 	cp -r "${RDSRC}"/* "$rdtmp"
 	ls ramdisk-overlay/* &>/dev/null &&
 		cp -r ramdisk-overlay/* "$rdtmp"
-	./mkbootfs "$rdtmp" | gzip -9 >initramfs.gz.tmp
-	rm -rf "$rdtmp"
-	mv initramfs.gz.tmp initramfs.gz
+	./mkbootfs "$rdtmp" | xz --check=crc32 --arm --lzma2=dict=32MiB >initramfs.xz.tmp
+	rm -Rf "$rdtmp"
+	mv initramfs.xz.tmp initramfs.xz
 	echo
 fi
 
@@ -253,7 +256,7 @@ do
 	echo "Packaging $dev..."
 	./mkbootimg \
 		--kernel "kbuild-$dev/arch/arm/boot/zImage" \
-		--ramdisk "initramfs.gz" \
+		--ramdisk "initramfs.xz" \
 		--cmdline "$BOOTCLI" \
 		$BOOTARGS \
 		--output "installer/boot.img"
@@ -263,6 +266,12 @@ do
 	rm -f "$BDIR/$NAME-$btype-$dev-$BD.zip"
 	(cd installer && zip -qr "../$BDIR/$NAME-$btype-$dev-$BD.zip" *)
 	echo "Created $BDIR/$NAME-$btype-$dev-$BD.zip"
+	sbi="$(stat -c %s installer/boot.img)"
+	let sd="$(du -b -d0 installer | cut -f 1)-$sbi"
+	sz="$(stat -c %s "$BDIR/$NAME-$btype-$dev-$BD.zip")"
+	echo "boot.img: $sbi; data: $sd; zip: $sz"
+	#echo "boot.img: $(stat -c %s installer/boot.img) bytes;" \
+		#"zip: $(stat -c %s "$BDIR/$NAME-$btype-$dev-$BD.zip") bytes"
 done
 
 if $EXP
