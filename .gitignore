@@ -3,7 +3,7 @@
 /build-*.log
 /devhostauth.sh
 /out/
-/installer/boot.img
+/installer/rd/zImage
 /installer/system/lib/modules/*.ko
 /installer/META-INF/com/google/android/updater-script
 /uninstaller/META-INF/com/google/android/updater-script
