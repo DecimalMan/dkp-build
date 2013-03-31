@@ -224,7 +224,6 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	package_extract_dir("rd", "/cache/rd");
 	set_perm(0, 0, 0755, "/cache/rd/mkbootimg");
 	set_perm(0, 0, 0755, "/cache/rd/unpackbootimg");
-	ifelse((
 	run_program("/cache/rd/unpackbootimg",
 		"-i", "/dev/block/mmcblk0p7",
 		"-o", "/cache/rd/oldkernel");
@@ -236,29 +235,24 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 		$(set -- "${BOOTARGS[@]}"; while [[ "$1" ]]; do
 			echo -n "\"$1\""; [[ "$2" ]] && echo -n ", "; shift
 		done));
-	),(
-		ui_print("mounting system");
-		run_program("/sbin/busybox", "mount", "/system");
-		ui_print("copying modules & initscripts");
-		package_extract_dir("system", "/system");
-		ui_print("setting permissions");
-		$(for f in installer/system/etc/init.d/*
-		do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
-		done
-		)$([[ -f installer/system/etc/init.qcom.post_boot.sh ]] && echo && \
-		echo 'set_perm(0, 0, 0755, "/system/etc/init.qcom.post_boot.sh");'
-		)$(ls installer/system/xbin/* &>/dev/null && echo && \
-		for f in installer/system/xbin/*
-		do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
-		done)
-		ui_print("unmounting system");
-		unmount("/system");
-		ui_print("flashing kernel");
-		write_raw_image("/cache/rd/boot.img", "/dev/block/mmcblk0p7");
-	),(
-		ui_print("couldn't generate boot.img!");
-		sleep(5);
-	));
+	ui_print("mounting system");
+	run_program("/sbin/busybox", "mount", "/system");
+	ui_print("copying modules & initscripts");
+	package_extract_dir("system", "/system");
+	ui_print("setting permissions");
+	$(for f in installer/system/etc/init.d/*
+	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
+	done
+	)$([[ -f installer/system/etc/init.qcom.post_boot.sh ]] && echo && \
+	echo 'set_perm(0, 0, 0755, "/system/etc/init.qcom.post_boot.sh");'
+	)$(ls installer/system/xbin/* &>/dev/null && echo && \
+	for f in installer/system/xbin/*
+	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
+	done)
+	ui_print("unmounting system");
+	unmount("/system");
+	ui_print("flashing kernel");
+	write_raw_image("/cache/rd/boot.img", "/dev/block/mmcblk0p7");
 	delete_recursive("/cache/rd");
 EOF
 for dev in "${devs[@]}"
@@ -355,7 +349,6 @@ then
 		die 1 "Couldn't log in."
 	html="$(curl -s -b <(echo "$cookies") d-h.st)" || \
 		die 1 "Couldn't fetch upload page."
-	echo "$html" >devhost.html
 	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${DHDIRS[$dhidx]//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
 		die 1 "Couldn't find folder ${DHDIRS[$dhidx]}."
 	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
