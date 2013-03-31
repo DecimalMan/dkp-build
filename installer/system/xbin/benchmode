@@ -1,0 +1,19 @@
+#!/system/bin/sh
+if [ "`whoami`" != "root" ]
+then su -c "$0"; exit
+fi
+
+(set -e
+c=/sys/devices/system/cpu
+if [ "`cat $c/cpu0/cpufreq/scaling_governor`" = performance ]
+then
+	[ -f $c/cpu1/cpufreq/scaling_governor ] && \
+	echo freelunch > $c/cpu1/cpufreq/scaling_governor
+	echo freelunch > $c/cpu0/cpufreq/scaling_governor
+	echo "Benchmarking Mode: OFF"
+else
+	echo performance > $c/cpu0/cpufreq/scaling_governor
+	echo 1 >$c/cpu1/online
+	echo performance > $c/cpu1/cpufreq/scaling_governor
+	echo "Benchmarking Mode: ON"
+fi) || echo "Error toggling Benchmarking Mode!"

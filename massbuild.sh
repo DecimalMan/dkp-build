@@ -7,6 +7,10 @@ KSRC=../android_kernel_samsung_d2
 # Kernel name used for filenames
 RNAME=dkp
 ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
+# Format used for filenames, relative to massbuild.sh
+ZIPFMT=('out/$rtype-$bdate/$name-$btype-$dev-$bdate.zip' \
+	'out/$rtype/$name-$btype-$dev-$bdate.zip' \
+	'out/$rtype-$bdate/uninstall-$name-$bdate.zip')
 # Devices available to build for
 ALLDEVS=(d2att d2cri d2spr d2usc d2vzw)
 # Devices that will be be marked 'release' rather than 'testing'
@@ -31,15 +35,17 @@ DHDIRS=(/dkp /dkp-wip)
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
 # Upload description ('release' 'experimental' 'uninstaller')
-DHDESC=('$NAME $(date +%x) release for $dev' '$NAME test build for $dev' '$NAME $(date +%x) uninstaller')
+DHDESC=('$RNAME $(date +%x) release for $dev' \
+	'$RNAME $ENAME branch test build for $dev' \
+	'$RNAME $(date +%x) uninstaller')
 
 ###  END OF CONFIGURABLES  ###
 
-DEVS=()
+devs=()
 export CROSS_COMPILE=../android-toolchain-eabi/bin/arm-eabi-
 
 askyn() { echo; read -n 1 -p "$* "; echo; [[ "$REPLY" == [Yy] ]]; }
-gbt() { { $EXP && btype="experimental"; } || { [[ "${STABLE[*]}" == *"$1"* ]] && btype="release"; } || btype="testing"; }
+gbt() { { $EXP && btype="experimental"; } || { [[ "${STABLE[*]}" == *"$1"* ]] && btype="release"; } || btype="testing"; eval izip="$ZIPFMT"; }
 die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
 
 cd "$(dirname "$(readlink -f "$0")")"
@@ -72,7 +78,7 @@ do
 	(u|--upload) DH=true;;
 	(-[^-]*);;
 	(*) 	if [[ "${ALLDEVS[*]}" == *"$v"* ]]
-		then DEVS=("${DEVS[@]}" "$v")
+		then devs=("${devs[@]}" "$v")
 		else
 			cat >&2 <<-EOF
 			Usage: $0 [options] [devices]
@@ -100,18 +106,20 @@ do
 done
 
 # Make sure we have devices to build
-[[ "${DEVS[*]}" ]] || DEVS=("${ALLDEVS[@]}")
+[[ "${devs[*]}" ]] || devs=("${ALLDEVS[@]}")
 
 # Use a more informative naming scheme for experimental builds
 if $EXP
 then
-	BD="$(date +%s)"
-	BDIR="out/experimental"
-	NAME="$ENAME"
+	name="$ENAME"
+	bdate="$(date +%s)"
+	rtype="experimental"
+	ZIPFMT="${ZIPFMT[1]}"
 else
-	BD="$(date +%Y%m%d)"
-	BDIR="out/release-$BD"
-	NAME="$RNAME"
+	name="$RNAME"
+	bdate="$(date +%Y%m%d)"
+	rtype="release"
+	eval uzip="${ZIPFMT[2]}"
 fi
 
 # Sanity-check the device to be flashed
@@ -125,7 +133,7 @@ then
 	[[ "$flashdev" == *"getprop: not found" ]] && \
 	flashdev="$(adb -d shell sed -n '/^ro.product.device/ { s/.*=//; p; }' /default.prop | \
 	sed 's/[^[:print:]]//g')"
-	[[ "${DEVS[*]}" == *"$flashdev"* ]] || \
+	[[ "${devs[*]}" == *"$flashdev"* ]] || \
 		die 1 "Not building for device to be flashed ($flashdev)."
 	case "$FLASH" in
 	(internal) flashdirs=(/storage/sdcard0 /sdcard/0);;
@@ -155,16 +163,16 @@ then
 fi
 
 # Rebuild ramdisk?
-if $RD || ! [[ -f initramfs.gz ]]
+if $RD || ! [[ -f initramfs.xz ]]
 then
 	echo "Rebuilding initramfs..."
 	rdtmp="$(mktemp -d 'initramfs.XXXXXX')"
 	cp -r "${RDSRC}"/* "$rdtmp"
 	ls ramdisk-overlay/* &>/dev/null &&
 		cp -r ramdisk-overlay/* "$rdtmp"
-	./mkbootfs "$rdtmp" | gzip -9 >initramfs.gz.tmp
-	rm -rf "$rdtmp"
-	mv initramfs.gz.tmp initramfs.gz
+	./mkbootfs "$rdtmp" | xz --check=crc32 --arm --lzma2=dict=32MiB >initramfs.xz.tmp
+	rm -Rf "$rdtmp"
+	mv initramfs.xz.tmp initramfs.xz
 	echo
 fi
 
@@ -173,60 +181,62 @@ fi
 # defconfig to run first and needs stdin.  Still, it's nice to have.
 KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\""
 # Explicitly use GNU make when available.
-M="$(which gmake make 2>&- | head -n 1)" || true
-[[ "$M" ]] || die 1 "make not found.  Can't build."
-"$M" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
+m="$(which gmake make 2>&- | head -n 1)" || true
+[[ "$m" ]] || die 1 "make not found.  Can't build."
+"$m" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
 if [[ "$cfg" ]]
 then mj=
 else mj="-j $(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
 fi
-if ! "$M" $mj "${DEVS[@]}" -k -f <(cat <<EOF
-${DEVS[@]}:
+if ! "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
+${devs[@]}:
 	@mkdir -p "kbuild-\$@"
 	@touch "build-failed-\$@"
-	@rm -f "massbuild-\$@.log"
+	@rm -f "build-\$@.log"
 	$({ $CL || $GL; } && \
 	echo "@echo Cleaning \$@..." && \
-	echo "$KB clean &>>\"massbuild-\$@.log\""
+	echo "$KB clean &>>\"build-\$@.log\""
 	)$($CF && \
 	echo && \
 	if [[ "$cfg" ]]
 	then
 		echo "	@echo Making $cfg for \$@..." && \
-		echo "$KB -s $cfg 2>>\"massbuild-\$@.log\""
+		echo "$KB -s $cfg 2>>\"build-\$@.log\""
 	else
 		echo "	@echo Making $CFGFMT..." && \
-		echo "$KB $CFGFMT &>>\"massbuild-\$@.log\""
+		echo "$KB $CFGFMT &>>\"build-\$@.log\""
 	fi
 	)$(! [[ "$cfg" ]] && \
 	echo && \
 	echo "	@echo Making all for \$@..." && \
 	echo "	@rm -f \"kbuild-\$@/.version\"" && \
-	echo "$KB &>>\"massbuild-\$@.log\"" && \
+	echo "$KB &>>\"build-\$@.log\"" && \
 	echo "	@echo Stripping \$@ modules..." && \
-	echo "	@find \"kbuild-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"massbuild-\$@.log\"" && \
+	echo "	@find \"kbuild-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"build-\$@.log\"" && \
 	echo "	@echo \"Finished building \$@.\""
 	)
 	@rm -f "build-failed-\$@"
-.PHONY: ${DEVS[@]}
+.PHONY: ${devs[@]}
 EOF
 )
 then
 	askyn "Review build logs for failed builds?" && \
 		less $(ls build-failed-* | \
-		sed -n 's/build-failed-\(d2[a-z]\{3\}\)/massbuild-\1.log/; T; p')
+		sed 's/build-failed-\([^ ]*\)/build-\1.log/')
 	rm -f build-failed-*
 	die 1 "Building failed."
 fi
-echo
 
-# Break here if needed.
-[[ "$cfg" ]] && die 0 "Restart without --config to build."
+[[ "$cfg" ]] && echo && die 0 "Restart without --config to build."
+
+$EXP && askyn "Review build logs?" && \
+		less $(sed 's/\(^\| \)\([^ ]*\)/build-\2.log /g' <<<"${devs[*]}")
+
+echo
 $PKG || die 0 "Packaging disabled by --no-package."
 
 # Package everything.  It would be nice to do this inside make, but that would
 # require per-device packaging directories.
-mkdir -p "$BDIR"
 echo "Generating install script..."
 cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	ui_print("mounting system");
@@ -248,28 +258,30 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	ui_print("flashing kernel");
 	package_extract_file("boot.img", "/dev/block/mmcblk0p7");
 EOF
-for dev in "${DEVS[@]}"
+for dev in "${devs[@]}"
 do
 	echo "Packaging $dev..."
 	./mkbootimg \
 		--kernel "kbuild-$dev/arch/arm/boot/zImage" \
-		--ramdisk "initramfs.gz" \
+		--ramdisk "initramfs.xz" \
 		--cmdline "$BOOTCLI" \
 		$BOOTARGS \
 		--output "installer/boot.img"
 	rm -f installer/system/lib/modules/*
 	find "kbuild-$dev" -name '*.ko' -exec cp '{}' installer/system/lib/modules ';'
 	gbt "$dev"
-	rm -f "$BDIR/$NAME-$btype-$dev-$BD.zip"
-	(cd installer && zip -qr "../$BDIR/$NAME-$btype-$dev-$BD.zip" *)
-	echo "Created $BDIR/$NAME-$btype-$dev-$BD.zip"
+	rm -f "$izip"
+	mkdir -p "$(dirname "$izip")"
+	(cd installer && zip -qr "../$izip" *)
+	echo "Created $izip"
+	sbi="$(stat -c %s installer/boot.img)"
+	let sd="$(du -b -d0 installer | cut -f 1)-$sbi"
+	sz="$(stat -c %s "$izip")"
+	echo "boot.img: $sbi; data: $sd; zip: $sz"
 done
 
-if $EXP
+if ! $EXP
 then
-	askyn "Review build logs?" && \
-		less $(sed 's/\(^\| \)\([^ ]*\)/massbuild-\2.log /g' <<<"${DEVS[*]}")
-else
 	echo "Generating uninstall script..."
 	cat >uninstaller/META-INF/com/google/android/updater-script <<-EOF
 		ui_print("mounting system");
@@ -295,9 +307,9 @@ else
 		run_program("/sbin/busybox", "umount", "/system");
 	EOF
 	echo "Packaging uninstaller..."
-	rm -f "$BDIR/uninstall-$NAME-$BD.zip"
-	(cd uninstaller && zip -qr "../$BDIR/uninstall-$NAME-$BD.zip" *)
-	echo "Created $BDIR/uninstall-$NAME-$BD.zip"
+	rm -f "$uzip"
+	(cd uninstaller && zip -qr "../$uzip" *)
+	echo "Created $uzip"
 fi
 
 if $FL
@@ -307,11 +319,10 @@ then
 		gbt "$dev"
 		# adb always returns 0, which sucks.
 		adb -d shell "mkdir -p \"$flashdir/massbuild/\""
-		echo "Pushing $NAME-$btype-$flashdev-$BD.zip..."
-		adb -d push "$BDIR/$NAME-$btype-$flashdev-$BD.zip" \
-			"$flashdir/massbuild/$NAME-$btype-$flashdev-$BD.zip"
+		echo "Pushing $izip..."
+		adb -d push "$izip" "$flashdir/massbuild/$(basename "$izip")"
 		echo "Generating OpenRecoveryScript..."
-		adb -d shell "e='echo \"install massbuild/$NAME-$btype-$flashdev-$BD.zip\" >/cache/recovery/openrecoveryscript'; su -c \"\$e\" || eval \"\$e\"" &>/dev/null
+		adb -d shell "e='echo \"install massbuild/$(basename "$izip")\" >/cache/recovery/openrecoveryscript'; su -c \"\$e\" || eval \"\$e\"" &>/dev/null
 		echo "Rebooting to recovery..."
 		adb -d reboot recovery
 	fi
@@ -325,14 +336,13 @@ then
 		dha=()
 		dhidx=1
 	else
-		dha=(-F "files[]=@$BDIR/uninstall-$NAME-$BD.zip" \
-			-F "file_description[]=$(eval echo "${DHDESC[2]}")")
+		dha=(-F "files[]=@$uzip" -F "file_description[]=$(eval echo "${DHDESC[2]}")")
 		dhidx=0
 	fi
-	for dev in "${DEVS[@]}"
+	for dev in "${devs[@]}"
 	do
 		gbt "$dev"
-		dha=("${dha[@]}" -F "files[]=@$BDIR/$NAME-$btype-$dev-$BD.zip" \
+		dha=("${dha[@]}" -F "files[]=@$izip" \
 			-F "file_description[]=$(eval echo "${DHDESC[$dhidx]}")")
 	done
 	[[ -r devhostauth.sh ]] && . ./devhostauth.sh || true
