@@ -30,7 +30,7 @@ FLASH=external
 # Dev-Host upload configs as ('release_val' 'experimental_val')
 # DHUSER and DHPASS should be set in devhostauth.sh
 # Upload directory, must already exist
-DHDIRS=(/dkp /dkp-wip)
+DHDIRS=(/dkp /dkp-3.4-wip)
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
 # Upload description ('release' 'experimental' 'uninstaller')
