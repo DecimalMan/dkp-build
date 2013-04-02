@@ -19,12 +19,10 @@ STABLE=(d2spr)
 # defconfig format, will be expanded per-device
 CFGFMT='cyanogen_$@_defconfig'
 
-# Ramdisk source, relative to massbuild.sh
-RDSRC=../../cm101/out/target/product/d2spr/root
 # boot.img kernel command line and arguments.  Without STRICT_RWX,
 # ramdisk_offset can be reduced (CM uses 0x0130000).
 BOOTCLI='console = null androidboot.hardware=qcom user_debug=31 zcache'
-BOOTARGS='--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01500000'
+BOOTARGS=(--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01500000)
 
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
@@ -52,7 +50,6 @@ die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1";
 cd "$(dirname "$(readlink -f "$0")")"
 
 GL=false
-RD=false
 CF=false
 CL=false
 EXP=true
@@ -75,7 +72,6 @@ do
 	(l|--linaro) GL=true;;
 	(n|--no-package) PKG=false;;
 	(r|--release) EXP=false;;
-	(R|--ramdisk) RD=true;;
 	(u|--upload) DH=true;;
 	(-[^-]*);;
 	(*) 	if [[ "${ALLDEVS[*]}" == *"$v"* ]]
@@ -91,14 +87,13 @@ do
 			-l (--linaro): upgrade Linaro toolchain ($(dirname "$0")/android-toolchain-eabi), implies -C
 			-n (--no-package): just build, don't package
 			-r (--release): package builds for release; generate uninstaller
-			-R (--ramdisk): regenerate ramdisk from built Android sources
 			-u (--upload): upload builds to Dev-Host
 			EOF
 			exit 1
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if ! getopts "cCflnrRu" v "$1"
+	if ! getopts "cCflnru" v "$1"
 	then
 		shift
 		v="$1"
@@ -163,20 +158,6 @@ then
 	echo
 fi
 
-# Rebuild ramdisk?
-if $RD || ! [[ -f initramfs.xz ]]
-then
-	echo "Rebuilding initramfs..."
-	rdtmp="$(mktemp -d 'initramfs.XXXXXX')"
-	cp -r "${RDSRC}"/* "$rdtmp"
-	ls ramdisk-overlay/* &>/dev/null &&
-		cp -r ramdisk-overlay/* "$rdtmp"
-	./mkbootfs "$rdtmp" | xz --check=crc32 --arm --lzma2=dict=32MiB >initramfs.xz.tmp
-	rm -Rf "$rdtmp"
-	mv initramfs.xz.tmp initramfs.xz
-	echo
-fi
-
 # Use the make jobserver to sort out building everything
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
@@ -236,10 +217,25 @@ $EXP && askyn "Review build logs?" && \
 echo
 $PKG || die 0 "Packaging disabled by --no-package."
 
-# Package everything.  It would be nice to do this inside make, but that would
-# require per-device packaging directories.
+# Package everything.  Ramdisk is borrowed from the existing kernel so I don't have to keep CM sources around.  boot.img is generated first to avoid overwriting existing modules on failure.
 echo "Generating install script..."
 cat >installer/META-INF/com/google/android/updater-script <<-EOF
+	ui_print("generating boot.img");
+	run_program("/sbin/mkdir", "-p", "/cache/rd");
+	package_extract_dir("rd", "/cache/rd");
+	set_perm(0, 0, 0755, "/cache/rd/mkbootimg");
+	set_perm(0, 0, 0755, "/cache/rd/unpackbootimg");
+	run_program("/cache/rd/unpackbootimg",
+		"-i", "/dev/block/mmcblk0p7",
+		"-o", "/cache/rd/oldkernel");
+	run_program("/cache/rd/mkbootimg",
+		"--kernel", "/cache/rd/zImage",
+		"--ramdisk", "/cache/rd/oldkernel/mmcblk0p7-ramdisk.gz",
+		"--cmdline", "$BOOTCLI",
+		"-o", "/cache/rd/boot.img",
+		$(set -- "${BOOTARGS[@]}"; while [[ "$1" ]]; do
+			echo -n "\"$1\""; [[ "$2" ]] && echo -n ", "; shift
+		done));
 	ui_print("mounting system");
 	run_program("/sbin/busybox", "mount", "/system");
 	ui_print("copying modules & initscripts");
@@ -257,17 +253,13 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	ui_print("unmounting system");
 	unmount("/system");
 	ui_print("flashing kernel");
-	package_extract_file("boot.img", "/dev/block/mmcblk0p7");
+	write_raw_image("/cache/rd/boot.img", "/dev/block/mmcblk0p7");
+	delete_recursive("/cache/rd");
 EOF
 for dev in "${devs[@]}"
 do
 	echo "Packaging $dev..."
-	./mkbootimg \
-		--kernel "kbuild-$dev/arch/arm/boot/zImage" \
-		--ramdisk "initramfs.xz" \
-		--cmdline "$BOOTCLI" \
-		$BOOTARGS \
-		--output "installer/boot.img"
+	cp "kbuild-$dev/arch/arm/boot/zImage" "installer/rd/zImage"
 	rm -f installer/system/lib/modules/*
 	find "kbuild-$dev" -name '*.ko' -exec cp '{}' installer/system/lib/modules ';'
 	gbt "$dev"
@@ -275,10 +267,10 @@ do
 	mkdir -p "$(dirname "$izip")"
 	(cd installer && zip -qr "../$izip" *)
 	echo "Created $izip"
-	sbi="$(stat -c %s installer/boot.img)"
+	sbi="$(stat -c %s installer/rd/zImage)"
 	let sd="$(du -b -d0 installer | cut -f 1)-$sbi"
 	sz="$(stat -c %s "$izip")"
-	echo "boot.img: $sbi; data: $sd; zip: $sz"
+	echo "zImage: $sbi; data: $sd; zip: $sz"
 done
 
 if ! $EXP
@@ -358,7 +350,6 @@ then
 		die 1 "Couldn't log in."
 	html="$(curl -s -b <(echo "$cookies") d-h.st)" || \
 		die 1 "Couldn't fetch upload page."
-	echo "$html" >devhost.html
 	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${DHDIRS[$dhidx]//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
 		die 1 "Couldn't find folder ${DHDIRS[$dhidx]}."
 	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
