@@ -1,4 +1,5 @@
 /android-toolchain-eabi/
+/gcc-trunk/
 /kbuild-*/
 /build-*.log
 /devhostauth.sh

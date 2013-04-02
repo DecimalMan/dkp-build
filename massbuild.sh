@@ -13,6 +13,7 @@ ZIPFMT=('out/$rtype-$bdate/$name-$btype-$dev-$bdate.zip' \
 	'out/$rtype-$bdate/uninstall-$name-$bdate.zip')
 # Devices available to build for
 ALLDEVS=(d2att d2cri d2spr d2usc d2vzw)
+DEFDEVS=(d2att d2spr d2vzw)
 # Devices that will be be marked 'release' rather than 'testing'
 STABLE=(d2spr)
 # defconfig format, will be expanded per-device
@@ -106,7 +107,7 @@ do
 done
 
 # Make sure we have devices to build
-[[ "${devs[*]}" ]] || devs=("${ALLDEVS[@]}")
+[[ "${devs[*]}" ]] || devs=("${DEFDEVS[@]}")
 
 # Use a more informative naming scheme for experimental builds
 if $EXP
