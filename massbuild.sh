@@ -42,6 +42,7 @@ DHDESC=('$RNAME $(date +%x) release for $dev' \
 
 devs=()
 export CROSS_COMPILE=../android-toolchain-eabi/bin/arm-eabi-
+#export CROSS_COMPILE=../gcc-trunk/bin/arm-linux-gnueabi-
 
 askyn() { echo; read -n 1 -p "$* "; echo; [[ "$REPLY" == [Yy] ]]; }
 gbt() { { $EXP && btype="experimental"; } || { [[ "${STABLE[*]}" == *"$1"* ]] && btype="release"; } || btype="testing"; eval izip="$ZIPFMT"; }
@@ -130,7 +131,7 @@ then
 	flashdev="$(adb -d shell sed -n '/^ro.product.device/ { s/.*=//; p; }' /default.prop | \
 	sed 's/[^[:print:]]//g')"
 	[[ "${devs[*]}" == *"$flashdev"* ]] || \
-		die 1 "Not building for device to be flashed ($flashdev)."
+		die 1 "not building for device to be flashed ($flashdev)."
 	case "$FLASH" in
 	(internal) flashdirs=(/storage/sdcard0 /sdcard/0);;
 	(external) flashdirs=(/storage/sdcard1 /external_sd);;
@@ -139,7 +140,7 @@ then
 	flashdir="$(adb -d shell ls -d "${flashdirs[@]}" | sed 's/[^[:print:]]//g' | \
 		grep -v 'No such file or directory')"
 	[[ "$flashdir" ]] || \
-		die 1 "Can't find device's $FLASH storage."
+		die 1 "can't find device's $FLASH storage."
 	echo
 fi
 
@@ -164,7 +165,7 @@ fi
 KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\""
 # Explicitly use GNU make when available.
 m="$(which gmake make 2>&- | head -n 1)" || true
-[[ "$m" ]] || die 1 "make not found.  Can't build."
+[[ "$m" ]] || die 1 "make not found; can't build."
 "$m" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
 if [[ "$cfg" ]]
 then mj=
@@ -206,16 +207,16 @@ then
 		less $(ls build-failed-* | \
 		sed 's/build-failed-\([^ ]*\)/build-\1.log/')
 	rm -f build-failed-*
-	die 1 "Building failed."
+	die 1 "building failed."
 fi
 
-[[ "$cfg" ]] && echo && die 0 "Restart without --config to build."
+[[ "$cfg" ]] && echo && die 0 "restart without --config to build."
 
 $EXP && askyn "Review build logs?" && \
 		less $(sed 's/\(^\| \)\([^ ]*\)/build-\2.log /g' <<<"${devs[*]}")
 
 echo
-$PKG || die 0 "Packaging disabled by --no-package."
+$PKG || die 0 "packaging disabled by --no-package."
 
 # Package everything.  Ramdisk is borrowed from the existing kernel so I don't have to keep CM sources around.  boot.img is generated first to avoid overwriting existing modules on failure.
 echo "Generating install script..."
@@ -347,15 +348,15 @@ then
 	fi
 	echo "Logging in as $DHUSER..."
 	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o /dev/null d-h.st)" || \
-		die 1 "Couldn't log in."
+		die 1 "couldn't log in."
 	html="$(curl -s -b <(echo "$cookies") d-h.st)" || \
-		die 1 "Couldn't fetch upload page."
+		die 1 "couldn't fetch upload page."
 	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${DHDIRS[$dhidx]//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
-		die 1 "Couldn't find folder ${DHDIRS[$dhidx]}."
+		die 1 "couldn't find folder ${DHDIRS[$dhidx]}."
 	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
-		die 1 "Couldn't determine upload URL."
+		die 1 "couldn't determine upload URL."
 	userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")" || \
-		die 1 "Couldn't determine user id."
+		die 1 "couldn't determine user id."
 	curl -F "UPLOAD_IDENTIFIER=${action##*=}" -F "action=upload" -F "uploadfolder=$dirid" -F "public=${DHPUB[$dhidx]}" -F "user_id=$userid" "${dha[@]}" -b <(echo "$cookies") "$action" -o /dev/null || \
-		die 1 "Upload unsuccessful."
+		die 1 "upload unsuccessful."
 fi
