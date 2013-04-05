@@ -245,8 +245,6 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	$(for f in installer/system/etc/init.d/*
 	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
 	done
-	)$([[ -f installer/system/etc/init.qcom.post_boot.sh ]] && echo && \
-	echo 'set_perm(0, 0, 0755, "/system/etc/init.qcom.post_boot.sh");'
 	)$(ls installer/system/xbin/* &>/dev/null && echo && \
 	for f in installer/system/xbin/*
 	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
@@ -288,8 +286,6 @@ then
 		$(for f in installer/system/etc/init.d/*
 		do echo "delete(\"${f#installer}\");"
 		done
-		)$([[ -f uninstaller/init.qcom.post_boot.sh ]] && echo && \
-		echo 'package_extract_file("init.qcom.post_boot.sh", "/system/etc/init.qcom.post_boot.sh");'
 		)$(ls installer/system/xbin/* &>/dev/null && echo && \
 		echo "ui_print(\"cleaning binaries\");" && \
 		for f in installer/system/xbin/*
