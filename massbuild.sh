@@ -218,25 +218,21 @@ $EXP && askyn "Review build logs?" && \
 echo
 $PKG || die 0 "packaging disabled by --no-package."
 
-# Package everything.  Ramdisk is borrowed from the existing kernel so I don't have to keep CM sources around.  boot.img is generated first to avoid overwriting existing modules on failure.
+# Package everything.  Ramdisk is borrowed from the existing kernel so I don't
+# have to keep CM sources around.  boot.img is generated first to avoid
+# overwriting existing modules on failure.
 echo "Generating install script..."
 cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	ui_print("generating boot.img");
 	run_program("/sbin/mkdir", "-p", "/cache/rd");
 	package_extract_dir("rd", "/cache/rd");
-	set_perm(0, 0, 0755, "/cache/rd/mkbootimg");
-	set_perm(0, 0, 0755, "/cache/rd/unpackbootimg");
-	run_program("/cache/rd/unpackbootimg",
-		"-i", "/dev/block/mmcblk0p7",
-		"-o", "/cache/rd/oldkernel");
-	run_program("/cache/rd/mkbootimg",
-		"--kernel", "/cache/rd/zImage",
-		"--ramdisk", "/cache/rd/oldkernel/mmcblk0p7-ramdisk.gz",
-		"--cmdline", "$BOOTCLI",
-		"-o", "/cache/rd/boot.img",
-		$(set -- "${BOOTARGS[@]}"; while [[ "$1" ]]; do
-			echo -n "\"$1\""; [[ "$2" ]] && echo -n ", "; shift
-		done));
+	set_perm(0, 0, 0755, "/cache/rd/repack");
+	run_program("/cache/rd/repack",
+		"/dev/block/mmcblk0p7",
+		"/cache/rd/zImage",
+		"/cache/rd/boot.img",
+		"0x1500000",
+		"$BOOTCLI");
 	ui_print("mounting system");
 	run_program("/sbin/busybox", "mount", "/system");
 	ui_print("copying modules & initscripts");
