@@ -316,9 +316,9 @@ fi
 
 if $DH
 then
+	askyn "Upload to Dev-Host?" || exit 0
 	if $EXP
 	then
-		askyn "Upload to Dev-Host?" || exit 0
 		dha=()
 		dhidx=1
 	else
