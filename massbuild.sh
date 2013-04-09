@@ -4,8 +4,10 @@
 
 # Kernel source location, relative to massbuild.sh
 KSRC=../android_kernel_samsung_d2
+# Kernel version username
+export KBUILD_BUILD_USER=decimalman
 # Kernel name used for filenames
-RNAME=dkp
+RNAME=dkp-3.4
 ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 # Format used for filenames, relative to massbuild.sh
 ZIPFMT=('out/$rtype-$bdate/$name-$btype-$dev-$bdate.zip' \
@@ -19,10 +21,9 @@ STABLE=(d2spr)
 # defconfig format, will be expanded per-device
 CFGFMT='cyanogen_$@_defconfig'
 
-# boot.img kernel command line and arguments.  Without STRICT_RWX,
-# ramdisk_offset can be reduced (CM uses 0x0130000).
+# boot.img kernel command line.  Without STRICT_RWX, ramdisk_offset can be
+# reduced (CM uses 0x0130000).
 BOOTCLI='console = null androidboot.hardware=qcom user_debug=31 zcache'
-BOOTARGS=(--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01500000)
 
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
@@ -30,7 +31,7 @@ FLASH=external
 # Dev-Host upload configs as ('release_val' 'experimental_val')
 # DHUSER and DHPASS should be set in devhostauth.sh
 # Upload directory, must already exist
-DHDIRS=(/dkp /dkp-wip)
+DHDIRS=(/dkp-3.4 /dkp-3.4-wip)
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
 # Upload description ('release' 'experimental' 'uninstaller')
@@ -42,6 +43,7 @@ DHDESC=('$RNAME $(date +%x) release for $dev' \
 
 devs=()
 export CROSS_COMPILE=../android-toolchain-eabi/bin/arm-eabi-
+#export CROSS_COMPILE=../gcc-trunk/bin/arm-linux-gnueabi-
 
 askyn() { echo; read -n 1 -p "$* "; echo; [[ "$REPLY" == [Yy] ]]; }
 gbt() { { $EXP && btype="experimental"; } || { [[ "${STABLE[*]}" == *"$1"* ]] && btype="release"; } || btype="testing"; eval izip="$ZIPFMT"; }
@@ -130,7 +132,7 @@ then
 	flashdev="$(adb -d shell sed -n '/^ro.product.device/ { s/.*=//; p; }' /default.prop | \
 	sed 's/[^[:print:]]//g')"
 	[[ "${devs[*]}" == *"$flashdev"* ]] || \
-		die 1 "Not building for device to be flashed ($flashdev)."
+		die 1 "not building for device to be flashed ($flashdev)."
 	case "$FLASH" in
 	(internal) flashdirs=(/storage/sdcard0 /sdcard/0);;
 	(external) flashdirs=(/storage/sdcard1 /external_sd);;
@@ -139,7 +141,7 @@ then
 	flashdir="$(adb -d shell ls -d "${flashdirs[@]}" | sed 's/[^[:print:]]//g' | \
 		grep -v 'No such file or directory')"
 	[[ "$flashdir" ]] || \
-		die 1 "Can't find device's $FLASH storage."
+		die 1 "can't find device's $FLASH storage."
 	echo
 fi
 
@@ -164,7 +166,7 @@ fi
 KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\""
 # Explicitly use GNU make when available.
 m="$(which gmake make 2>&- | head -n 1)" || true
-[[ "$m" ]] || die 1 "make not found.  Can't build."
+[[ "$m" ]] || die 1 "make not found; can't build."
 "$m" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
 if [[ "$cfg" ]]
 then mj=
@@ -206,36 +208,32 @@ then
 		less $(ls build-failed-* | \
 		sed 's/build-failed-\([^ ]*\)/build-\1.log/')
 	rm -f build-failed-*
-	die 1 "Building failed."
+	die 1 "building failed."
 fi
 
-[[ "$cfg" ]] && echo && die 0 "Restart without --config to build."
+[[ "$cfg" ]] && echo && die 0 "restart without --config to build."
 
 $EXP && askyn "Review build logs?" && \
 		less $(sed 's/\(^\| \)\([^ ]*\)/build-\2.log /g' <<<"${devs[*]}")
 
 echo
-$PKG || die 0 "Packaging disabled by --no-package."
+$PKG || die 0 "packaging disabled by --no-package."
 
-# Package everything.  Ramdisk is borrowed from the existing kernel so I don't have to keep CM sources around.  boot.img is generated first to avoid overwriting existing modules on failure.
+# Package everything.  Ramdisk is borrowed from the existing kernel so I don't
+# have to keep CM sources around.  boot.img is generated first to avoid
+# overwriting existing modules on failure.
 echo "Generating install script..."
 cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	ui_print("generating boot.img");
 	run_program("/sbin/mkdir", "-p", "/cache/rd");
 	package_extract_dir("rd", "/cache/rd");
-	set_perm(0, 0, 0755, "/cache/rd/mkbootimg");
-	set_perm(0, 0, 0755, "/cache/rd/unpackbootimg");
-	run_program("/cache/rd/unpackbootimg",
-		"-i", "/dev/block/mmcblk0p7",
-		"-o", "/cache/rd/oldkernel");
-	run_program("/cache/rd/mkbootimg",
-		"--kernel", "/cache/rd/zImage",
-		"--ramdisk", "/cache/rd/oldkernel/mmcblk0p7-ramdisk.gz",
-		"--cmdline", "$BOOTCLI",
-		"-o", "/cache/rd/boot.img",
-		$(set -- "${BOOTARGS[@]}"; while [[ "$1" ]]; do
-			echo -n "\"$1\""; [[ "$2" ]] && echo -n ", "; shift
-		done));
+	set_perm(0, 0, 0755, "/cache/rd/repack");
+	run_program("/cache/rd/repack",
+		"/dev/block/mmcblk0p7",
+		"/cache/rd/zImage",
+		"/cache/rd/boot.img",
+		"0x1500000",
+		"$BOOTCLI");
 	ui_print("mounting system");
 	run_program("/sbin/busybox", "mount", "/system");
 	ui_print("copying modules & initscripts");
@@ -244,8 +242,6 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	$(for f in installer/system/etc/init.d/*
 	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
 	done
-	)$([[ -f installer/system/etc/init.qcom.post_boot.sh ]] && echo && \
-	echo 'set_perm(0, 0, 0755, "/system/etc/init.qcom.post_boot.sh");'
 	)$(ls installer/system/xbin/* &>/dev/null && echo && \
 	for f in installer/system/xbin/*
 	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
@@ -287,8 +283,6 @@ then
 		$(for f in installer/system/etc/init.d/*
 		do echo "delete(\"${f#installer}\");"
 		done
-		)$([[ -f uninstaller/init.qcom.post_boot.sh ]] && echo && \
-		echo 'package_extract_file("init.qcom.post_boot.sh", "/system/etc/init.qcom.post_boot.sh");'
 		)$(ls installer/system/xbin/* &>/dev/null && echo && \
 		echo "ui_print(\"cleaning binaries\");" && \
 		for f in installer/system/xbin/*
@@ -323,9 +317,9 @@ fi
 
 if $DH
 then
+	askyn "Upload to Dev-Host?" || exit 0
 	if $EXP
 	then
-		askyn "Upload to Dev-Host?" || exit 0
 		dha=()
 		dhidx=1
 	else
@@ -347,15 +341,15 @@ then
 	fi
 	echo "Logging in as $DHUSER..."
 	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o /dev/null d-h.st)" || \
-		die 1 "Couldn't log in."
+		die 1 "couldn't log in."
 	html="$(curl -s -b <(echo "$cookies") d-h.st)" || \
-		die 1 "Couldn't fetch upload page."
+		die 1 "couldn't fetch upload page."
 	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${DHDIRS[$dhidx]//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
-		die 1 "Couldn't find folder ${DHDIRS[$dhidx]}."
+		die 1 "couldn't find folder ${DHDIRS[$dhidx]}."
 	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
-		die 1 "Couldn't determine upload URL."
+		die 1 "couldn't determine upload URL."
 	userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")" || \
-		die 1 "Couldn't determine user id."
+		die 1 "couldn't determine user id."
 	curl -F "UPLOAD_IDENTIFIER=${action##*=}" -F "action=upload" -F "uploadfolder=$dirid" -F "public=${DHPUB[$dhidx]}" -F "user_id=$userid" "${dha[@]}" -b <(echo "$cookies") "$action" -o /dev/null || \
-		die 1 "Upload unsuccessful."
+		die 1 "upload unsuccessful."
 fi
