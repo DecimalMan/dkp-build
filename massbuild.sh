@@ -4,6 +4,8 @@
 
 # Kernel source location, relative to massbuild.sh
 KSRC=../android_kernel_samsung_d2
+# Kernel version username
+export KBUILD_BUILD_USER=decimalman
 # Kernel name used for filenames
 RNAME=dkp-3.4
 ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
@@ -19,10 +21,9 @@ STABLE=(d2spr)
 # defconfig format, will be expanded per-device
 CFGFMT='cyanogen_$@_defconfig'
 
-# boot.img kernel command line and arguments.  Without STRICT_RWX,
-# ramdisk_offset can be reduced (CM uses 0x0130000).
+# boot.img kernel command line.  Without STRICT_RWX, ramdisk_offset can be
+# reduced (CM uses 0x0130000).
 BOOTCLI='console = null androidboot.hardware=qcom user_debug=31 zcache'
-BOOTARGS=(--base 0x80200000 --pagesize 2048 --ramdisk_offset 0x01500000)
 
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
