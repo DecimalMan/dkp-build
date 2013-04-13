@@ -14,16 +14,17 @@ ZIPFMT=('out/$rtype-$bdate/$name-$btype-$dev-$bdate.zip' \
 	'out/$rtype/$name-$btype-$dev-$bdate.zip' \
 	'out/$rtype-$bdate/uninstall-$name-$bdate.zip')
 # Devices available to build for
-ALLDEVS=(d2att-d2tmo d2cri d2spr d2usc d2vzw)
-DEFDEVS=(d2att-d2tmo d2spr d2vzw)
+ALLDEVS=(d2att d2att-d2tmo d2cri d2spr d2usc d2vzw)
+DEFDEVS=(d2att-d2tmo d2spr d2usc d2vzw)
 # Devices that will be be marked 'release' rather than 'testing'
 STABLE=(d2spr)
 # defconfig format, will be expanded per-device
 CFGFMT='cyanogen_$@_defconfig'
 
-# boot.img kernel command line.  Without STRICT_RWX, ramdisk_offset can be
-# reduced (CM uses 0x0130000).
+# boot.img kernel command line.  Without STRICT_RWX, RDO can be reduced (CM
+# uses 0x0130000).
 BOOTCLI='console = null androidboot.hardware=qcom user_debug=31 zcache'
+BOOTRDO='0x1500000'
 
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
@@ -76,7 +77,7 @@ do
 	(r|--release) EXP=false;;
 	(u|--upload) DH=true;;
 	(-[^-]*);;
-	(*) 	if [[ "${ALLDEVS[*]}" == *"$v"* ]]
+	(*) 	if [[ " ${ALLDEVS[*]} " == *" $v "* ]]
 		then devs=("${devs[@]}" "$v")
 		else
 			cat >&2 <<-EOF
@@ -134,12 +135,13 @@ then
 	[[ "${devs[*]}" == *"$flashdev"* ]] || \
 		die 1 "not building for device to be flashed ($flashdev)."
 	case "$FLASH" in
-	(internal) flashdirs=(/storage/sdcard0 /sdcard/0);;
+	(internal) flashdirs=(/storage/emulated/legacy /sdcard);;
 	(external) flashdirs=(/storage/sdcard1 /external_sd);;
 	(*) die 1 "FLASH must be 'internal' or 'external'.";;
 	esac
-	flashdir="$(adb -d shell ls -d "${flashdirs[@]}" | sed 's/[^[:print:]]//g' | \
-		grep -v 'No such file or directory')"
+	flashdir="$(adb -d shell ls -d "${flashdirs[@]}" | \
+		grep -v 'No such file or directory' | head -n 1 | \
+		sed 's/[^[:print:]]//g')"
 	[[ "$flashdir" ]] || \
 		die 1 "can't find device's $FLASH storage."
 	echo
@@ -232,7 +234,7 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 		"/dev/block/mmcblk0p7",
 		"/cache/rd/zImage",
 		"/cache/rd/boot.img",
-		"0x1500000",
+		"$BOOTRDO",
 		"$BOOTCLI");
 	ui_print("mounting system");
 	run_program("/sbin/busybox", "mount", "/system");
