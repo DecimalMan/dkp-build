@@ -3,7 +3,7 @@
 ### CONFIGURABLE SETTINGS: ###
 
 # Kernel source location, relative to massbuild.sh
-KSRC=../android_kernel_samsung_d2
+KSRC=../dkp
 # Kernel version username
 export KBUILD_BUILD_USER=decimalman
 # Kernel name used for filenames
@@ -155,9 +155,9 @@ then
 	if curl "http://snapshots.linaro.org/android/~linaro-android/toolchain-4.7-bzr/lastSuccessful/android-toolchain-eabi-4.7-daily-linux-x86.tar.bz2" | tar xj
 	then rm -Rf android-toolchain-eabi.old
 	else
-		echo "Fetch failed.  Restoring old toolchain..."
 		rm -Rf android-toolchain-eabi
 		mv android-toolchain-eabi{.old,}
+		die 1 "fetch failed.  Old toolchain restored."
 	fi
 	echo
 fi
