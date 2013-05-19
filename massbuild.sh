@@ -4,15 +4,16 @@
 
 # Kernel source location, relative to massbuild.sh
 KSRC=../dkp
+KVER="$(sed -n '1{s/.*= //;h;n;s/.*= /./;H;x;s/\n//;p;q}' "$KSRC/Makefile")"
 # Kernel version username
 export KBUILD_BUILD_USER=decimalman
 # Kernel name used for filenames
-RNAME=dkp-3.4
+RNAME=dkp-$KVER
 ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 # Format used for filenames, relative to massbuild.sh
-ZIPFMT=('out/$rtype-$bdate/$name-$btype-$dev-$bdate.zip' \
-	'out/$rtype/$name-$btype-$dev-$bdate.zip' \
-	'out/$rtype-$bdate/uninstall-$name-$bdate.zip')
+ZIPFMT=('out/$rtype-$bdate/$RNAME-$dev-$bdate.zip' \
+	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip' \
+	'out/$rtype-$bdate/uninstall-$RNAME-$bdate.zip')
 # Devices available to build for
 ALLDEVS=(d2att d2att-d2tmo d2cri d2spr d2usc d2vzw)
 DEFDEVS=(d2att-d2tmo d2spr d2usc d2vzw)
@@ -32,7 +33,7 @@ FLASH=external
 # Dev-Host upload configs as ('release_val' 'experimental_val')
 # DHUSER and DHPASS should be set in devhostauth.sh
 # Upload directory, must already exist
-DHDIRS=(/dkp-3.4 /dkp-3.4-wip)
+DHDIRS=("/dkp-$KVER" "/dkp-$KVER-wip")
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
 # Upload description ('release' 'experimental' 'uninstaller')
@@ -43,12 +44,17 @@ DHDESC=('$RNAME $(date +%x) release for $dev' \
 ###  END OF CONFIGURABLES  ###
 
 devs=()
-export CROSS_COMPILE=../android-toolchain-eabi/bin/arm-eabi-
-#export CROSS_COMPILE=../gcc-trunk/bin/arm-linux-gnueabi-
+#export CROSS_COMPILE=../hybrid-toolchain/bin/arm-linux-gnueabi-
+export CROSS_COMPILE=../hybrid-4_7-toolchain/bin/arm-linux-gnueabi-
 
+# Quick prompt
 askyn() { echo; read -n 1 -p "$* "; echo; [[ "$REPLY" == [Yy] ]]; }
+# Set output vars
 gbt() { { $EXP && btype="experimental"; } || { [[ "${STABLE[*]}" == *"$1"* ]] && btype="release"; } || btype="testing"; eval izip="$ZIPFMT"; }
+# Fancy termination messages
 die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
+# ADB shell with return value
+adbsh() { ((r="$(adb -d shell "$@; echo \$?" | sed 's/\r//' | tee >(sed '$d' >&3) | tail -n 1)" && exit $r) 3>&1) }
 
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -59,6 +65,7 @@ EXP=true
 PKG=true
 FL=false
 DH=false
+BOGUS_ERRORS=false
 cfg=
 v="$1"
 while [[ "$v" ]]
@@ -74,6 +81,7 @@ do
 	(f|--flash) FL=true;;
 	(l|--linaro) GL=true;;
 	(n|--no-package) PKG=false;;
+	(--no-really) BOGUS_ERRORS=true;;
 	(r|--release) EXP=false;;
 	(u|--upload) DH=true;;
 	(-[^-]*);;
@@ -96,7 +104,7 @@ do
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if ! getopts "cCflnru" v "$1"
+	if [[ "$1" == --* ]] || ! getopts "cCflnru" v "$1"
 	then
 		shift
 		v="$1"
@@ -110,12 +118,10 @@ done
 # Use a more informative naming scheme for experimental builds
 if $EXP
 then
-	name="$ENAME"
-	bdate="$(date +%s)"
+	bdate="$(date +%Y%m%d-%H%M%S)"
 	rtype="experimental"
 	ZIPFMT="${ZIPFMT[1]}"
 else
-	name="$RNAME"
 	bdate="$(date +%Y%m%d)"
 	rtype="release"
 	eval uzip="${ZIPFMT[2]}"
@@ -128,10 +134,8 @@ then
 	adb start-server &>/dev/null
 	adb -d shell : >&-
 	# Note to Google: unices don't like CRLF.
-	flashdev="$(adb -d shell getprop ro.product.device | sed 's/[^[:print:]]//g')"
-	[[ "$flashdev" == *"getprop: not found" ]] && \
-	flashdev="$(adb -d shell sed -n '/^ro.product.device/ { s/.*=//; p; }' /default.prop | \
-	sed 's/[^[:print:]]//g')"
+	flashdev="$(adbsh 'getprop ro.product.device')" || \
+	flashdev="$(adbsh 'sed -n "/^ro.product.device/{s/.*=//;p}" /default.prop')"
 	[[ "${devs[*]}" == *"$flashdev"* ]] || \
 		die 1 "not building for device to be flashed ($flashdev)."
 	case "$FLASH" in
@@ -141,7 +145,7 @@ then
 	esac
 	flashdir="$(adb -d shell ls -d "${flashdirs[@]}" | \
 		grep -v 'No such file or directory' | head -n 1 | \
-		sed 's/[^[:print:]]//g')"
+		sed 's/\r//')"
 	[[ "$flashdir" ]] || \
 		die 1 "can't find device's $FLASH storage."
 	echo
@@ -165,9 +169,9 @@ fi
 # Use the make jobserver to sort out building everything
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
-KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\""
-# Explicitly use GNU make when available.
-m="$(which gmake make 2>&- | head -n 1)" || true
+KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\"" # CONFIG_DEBUG_SECTION_MISMATCH=y"
+# Explicitly use lto-fixed GNU make when available.
+m="$(which lmake gmake make 2>&- | head -n 1)" || true
 [[ "$m" ]] || die 1 "make not found; can't build."
 "$m" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
 if [[ "$cfg" ]]
@@ -196,7 +200,10 @@ ${devs[@]}:
 	echo && \
 	echo "	@echo Making all for \$@..." && \
 	echo "	@rm -f \"kbuild-\$@/.version\"" && \
-	echo "$KB &>>\"build-\$@.log\"" && \
+	(if $BOGUS_ERRORS
+	then echo "	until $KB &>>\"build-\$@.log\"; do :; done"
+	else echo "$KB &>>\"build-\$@.log\""
+	fi) && \
 	echo "	@echo Stripping \$@ modules..." && \
 	echo "	@find \"kbuild-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"build-\$@.log\"" && \
 	echo "	@echo \"Finished building \$@.\""
@@ -265,6 +272,8 @@ do
 	mkdir -p "$(dirname "$izip")"
 	(cd installer && zip -qr "../$izip" *)
 	echo "Created $izip"
+	cp "kbuild-$dev/System.map" "${izip%zip}map"
+	echo "Saved $dev System.map"
 	sbi="$(stat -c %s installer/rd/zImage)"
 	let sd="$(du -b -d0 installer | cut -f 1)-$sbi"
 	sz="$(stat -c %s "$izip")"
@@ -290,8 +299,9 @@ then
 		for f in installer/system/xbin/*
 		do echo "delete(\"${f#installer}\");"
 		done
+		)$(ls installer/system/etc/init.qcom.post_boot.sh &>/dev/null && echo && \
+		echo 'set_perm(0, 0, 0755, "/system/etc/init.qcom.post_boot.sh");'
 		)
-		set_perm(0, 0, 0755, "/system/etc/init.qcom.post_boot.sh");
 		ui_print("unmounting system");
 		run_program("/sbin/busybox", "umount", "/system");
 	EOF
@@ -305,13 +315,15 @@ if $FL
 then
 	if askyn "Flash to device?"
 	then
-		gbt "$dev"
+		gbt "$flashdev"
 		# adb always returns 0, which sucks.
-		adb -d shell "mkdir -p \"$flashdir/massbuild/\""
+		adbsh "mkdir -p '$flashdir/massbuild/'"
 		echo "Pushing $izip..."
 		adb -d push "$izip" "$flashdir/massbuild/$(basename "$izip")"
+		adbsh "[ -f '$flashdir/massbuild/$(basename "$izip")' ]" >/dev/null
 		echo "Generating OpenRecoveryScript..."
-		adb -d shell "e='echo \"install massbuild/$(basename "$izip")\" >/cache/recovery/openrecoveryscript'; su -c \"\$e\" || eval \"\$e\"" &>/dev/null
+		inst="echo install massbuild/$(basename "$izip") >/cache/recovery/openrecoveryscript"
+		(adbsh "su -c '$inst'" || adbsh "$inst") >/dev/null
 		echo "Rebooting to recovery..."
 		adb -d reboot recovery
 	fi
