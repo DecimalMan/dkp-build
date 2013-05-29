@@ -4,7 +4,9 @@
 
 # Kernel source location, relative to massbuild.sh
 KSRC=../dkp
+#KSRC=../tw
 KVER="$(sed -n '1{s/.*= //;h;n;s/.*= /./;H;x;s/\n//;p;q}' "$KSRC/Makefile")"
+#KVER=tw
 # Kernel version username
 export KBUILD_BUILD_USER=decimalman
 # Kernel name used for filenames
@@ -44,13 +46,14 @@ DHDESC=('$RNAME $(date +%x) release for $dev' \
 ###  END OF CONFIGURABLES  ###
 
 devs=()
-#export CROSS_COMPILE=../hybrid-toolchain/bin/arm-linux-gnueabi-
-export CROSS_COMPILE=../hybrid-4_7-toolchain/bin/arm-linux-gnueabi-
+flashdev=
+export CROSS_COMPILE=../hybrid-toolchain/bin/arm-linux-gnueabi-
+#export CROSS_COMPILE=../hybrid-4_7-toolchain/bin/arm-linux-gnueabi-
 
 # Quick prompt
-askyn() { echo; read -n 1 -p "$* "; echo; [[ "$REPLY" == [Yy] ]]; }
+askyn() { echo; read -n 1 -p "$* "; echo ${NONL:+-n}; [[ "$REPLY" == [Yy] ]]; }
 # Set output vars
-gbt() { { $EXP && btype="experimental"; } || { [[ "${STABLE[*]}" == *"$1"* ]] && btype="release"; } || btype="testing"; eval izip="$ZIPFMT"; }
+gbt() { { $EXP && btype="experimental"; } || { [[ "${STABLE[*]}" == *"$1"* ]] && btype="release"; } || btype="testing"; dev="$1" eval izip="$ZIPFMT"; }
 # Fancy termination messages
 die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
 # ADB shell with return value
@@ -58,7 +61,6 @@ adbsh() { ((r="$(adb -d shell "$@; echo \$?" | sed 's/\r//' | tee >(sed '$d' >&3
 
 cd "$(dirname "$(readlink -f "$0")")"
 
-GL=false
 CF=false
 CL=false
 EXP=true
@@ -79,7 +81,6 @@ do
 		{ cfg="$2"; s="$1"; shift 2; set -- "$s" "$@"; };;
 	(C|--clean) CL=true;;
 	(f|--flash) FL=true;;
-	(l|--linaro) GL=true;;
 	(n|--no-package) PKG=false;;
 	(--no-really) BOGUS_ERRORS=true;;
 	(r|--release) EXP=false;;
@@ -95,7 +96,6 @@ do
 			-c (--config) [<target>]: configure each device before building
 			-C (--clean): make clean for each device before building
 			-f (--flash): automagically flash
-			-l (--linaro): upgrade Linaro toolchain ($(dirname "$0")/android-toolchain-eabi), implies -C
 			-n (--no-package): just build, don't package
 			-r (--release): package builds for release; generate uninstaller
 			-u (--upload): upload builds to Dev-Host
@@ -127,49 +127,10 @@ else
 	eval uzip="${ZIPFMT[2]}"
 fi
 
-# Sanity-check the device to be flashed
-if $FL
-then
-	echo "Checking device to be flashed..."
-	adb start-server &>/dev/null
-	adb -d shell : >&-
-	# Note to Google: unices don't like CRLF.
-	flashdev="$(adbsh 'getprop ro.product.device')" || \
-	flashdev="$(adbsh 'sed -n "/^ro.product.device/{s/.*=//;p}" /default.prop')"
-	[[ "${devs[*]}" == *"$flashdev"* ]] || \
-		die 1 "not building for device to be flashed ($flashdev)."
-	case "$FLASH" in
-	(internal) flashdirs=(/storage/emulated/legacy /sdcard);;
-	(external) flashdirs=(/storage/sdcard1 /external_sd);;
-	(*) die 1 "FLASH must be 'internal' or 'external'.";;
-	esac
-	flashdir="$(adb -d shell ls -d "${flashdirs[@]}" | \
-		grep -v 'No such file or directory' | head -n 1 | \
-		sed 's/\r//')"
-	[[ "$flashdir" ]] || \
-		die 1 "can't find device's $FLASH storage."
-	echo
-fi
-
-# Update Linaro?
-if $GL
-then
-	echo "Fetching latest Linaro nightly toolchain..."
-	mv android-toolchain-eabi{,.old}
-	if curl "http://snapshots.linaro.org/android/~linaro-android/toolchain-4.7-bzr/lastSuccessful/android-toolchain-eabi-4.7-daily-linux-x86.tar.bz2" | tar xj
-	then rm -Rf android-toolchain-eabi.old
-	else
-		rm -Rf android-toolchain-eabi
-		mv android-toolchain-eabi{.old,}
-		die 1 "fetch failed.  Old toolchain restored."
-	fi
-	echo
-fi
-
 # Use the make jobserver to sort out building everything
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
-KB="	@\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\"" # CONFIG_DEBUG_SECTION_MISMATCH=y"
+KB="\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\"" # CONFIG_DEBUG_SECTION_MISMATCH=y"
 # Explicitly use lto-fixed GNU make when available.
 m="$(which lmake gmake make 2>&- | head -n 1)" || true
 [[ "$m" ]] || die 1 "make not found; can't build."
@@ -183,26 +144,26 @@ ${devs[@]}:
 	@mkdir -p "kbuild-\$@"
 	@touch "build-failed-\$@"
 	@rm -f "build-\$@.log"
-	$({ $CL || $GL; } && \
+	$($CL && \
 	echo "@echo Cleaning \$@..." && \
-	echo "$KB clean &>>\"build-\$@.log\""
+	echo "	@$KB clean &>>\"build-\$@.log\""
 	)$($CF && \
 	echo && \
 	if [[ "$cfg" ]]
 	then
 		echo "	@echo Making $cfg for \$@..." && \
-		echo "$KB -s $cfg 2>>\"build-\$@.log\""
+		echo "	@$KB -s $cfg 2>>\"build-\$@.log\""
 	else
 		echo "	@echo Making $CFGFMT..." && \
-		echo "$KB $CFGFMT &>>\"build-\$@.log\""
+		echo "	@$KB $CFGFMT &>>\"build-\$@.log\""
 	fi
 	)$(! [[ "$cfg" ]] && \
 	echo && \
 	echo "	@echo Making all for \$@..." && \
 	echo "	@rm -f \"kbuild-\$@/.version\"" && \
 	(if $BOGUS_ERRORS
-	then echo "	until $KB &>>\"build-\$@.log\"; do :; done"
-	else echo "$KB &>>\"build-\$@.log\""
+	then echo "	@until $KB &>>\"build-\$@.log\"; do :; done"
+	else echo "	@$KB &>>\"build-\$@.log\""
 	fi) && \
 	echo "	@echo Stripping \$@ modules..." && \
 	echo "	@find \"kbuild-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"build-\$@.log\"" && \
@@ -313,19 +274,48 @@ fi
 
 if $FL
 then
-	if askyn "Flash to device?"
+	if NONL=y askyn "Flash to device?"
 	then
-		gbt "$flashdev"
-		# adb always returns 0, which sucks.
-		adbsh "mkdir -p '$flashdir/massbuild/'"
-		echo "Pushing $izip..."
-		adb -d push "$izip" "$flashdir/massbuild/$(basename "$izip")"
-		adbsh "[ -f '$flashdir/massbuild/$(basename "$izip")' ]" >/dev/null
-		echo "Generating OpenRecoveryScript..."
-		inst="echo install massbuild/$(basename "$izip") >/cache/recovery/openrecoveryscript"
-		(adbsh "su -c '$inst'" || adbsh "$inst") >/dev/null
-		echo "Rebooting to recovery..."
-		adb -d reboot recovery
+		while ! [[ "$flashdev" ]]
+		do
+			if adb -d shell : &>/dev/null
+			then
+				# Note to Google: unices don't like CRLF.
+				flashdev="$(adbsh 'getprop ro.product.device')" || \
+				flashdev="$(adbsh 'sed -n "/^ro.product.device/{s/.*=//;p}" /default.prop')"
+			fi
+			[[ "$flashdev" ]] &&
+			[[ "${devs[*]}" == *"$flashdev"* ]] || \
+				NONL=y askyn "No suitable device connected.  Retry?" || \
+				break
+		done
+		echo
+		if [[ "$flashdev" ]]
+		then
+			case "$FLASH" in
+			(internal) flashdirs=(/storage/emulated/legacy /storage/sdcard0 /sdcard);;
+			(external) flashdirs=(/storage/sdcard1 /storage/extSdCard /external_sd);;
+			(*) die 1 "FLASH must be 'internal' or 'external'.";;
+			esac
+			flashdir="$(adb -d shell ls -d "${flashdirs[@]}" | \
+				grep -v 'No such file or directory' | head -n 1 | \
+				sed 's/\r//')"
+			[[ "$flashdir" ]] || \
+				die 1 "can't find device's $FLASH storage."
+
+			gbt "$flashdev"
+			# adb always returns 0, which sucks.
+			adbsh "mkdir -p '$flashdir/massbuild/'"
+			echo "Pushing $izip..."
+			adb -d push "$izip" "$flashdir/massbuild/$(basename "$izip")"
+			adbsh "[ -f '$flashdir/massbuild/$(basename "$izip")' ]" >/dev/null
+			echo "Generating OpenRecoveryScript..."
+			inst="echo install massbuild/$(basename "$izip") >/cache/recovery/openrecoveryscript"
+			(adbsh "su -c '$inst'" || adbsh "$inst") >/dev/null
+			echo "Rebooting to recovery..."
+			adb -d reboot recovery
+		fi
+	else	echo
 	fi
 fi
 
