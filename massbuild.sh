@@ -4,9 +4,12 @@
 
 # Kernel source location, relative to massbuild.sh
 KSRC=../dkp
-#KSRC=../tw
 KVER="$(sed -n '1{s/.*= //;h;n;s/.*= /./;H;x;s/\n//;p;q}' "$KSRC/Makefile")"
-#KVER=tw
+if [ "$TW" == "yup" ]
+then
+	KSRC=../tw
+	KVER=tw
+fi
 # Kernel version username
 export KBUILD_BUILD_USER=decimalman
 # Kernel name used for filenames
@@ -130,7 +133,7 @@ fi
 # Use the make jobserver to sort out building everything
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
-KB="\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-\$@\"" # CONFIG_DEBUG_SECTION_MISMATCH=y"
+KB="\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-$KVER-\$@\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
 # Explicitly use lto-fixed GNU make when available.
 m="$(which lmake gmake make 2>&- | head -n 1)" || true
 [[ "$m" ]] || die 1 "make not found; can't build."
@@ -141,7 +144,7 @@ else mj="-j $(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
 fi
 if ! "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
 ${devs[@]}:
-	@mkdir -p "kbuild-\$@"
+	@mkdir -p "kbuild-$KVER-\$@"
 	@touch "build-failed-\$@"
 	@rm -f "build-\$@.log"
 	$($CL && \
@@ -160,13 +163,13 @@ ${devs[@]}:
 	)$(! [[ "$cfg" ]] && \
 	echo && \
 	echo "	@echo Making all for \$@..." && \
-	echo "	@rm -f \"kbuild-\$@/.version\"" && \
+	echo "	@rm -f \"kbuild-$KVER-\$@/.version\"" && \
 	(if $BOGUS_ERRORS
 	then echo "	@until $KB &>>\"build-\$@.log\"; do :; done"
 	else echo "	@$KB &>>\"build-\$@.log\""
 	fi) && \
 	echo "	@echo Stripping \$@ modules..." && \
-	echo "	@find \"kbuild-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"build-\$@.log\"" && \
+	echo "	@find \"kbuild-$KVER-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"build-\$@.log\"" && \
 	echo "	@echo \"Finished building \$@.\""
 	)
 	@rm -f "build-failed-\$@"
@@ -225,15 +228,15 @@ EOF
 for dev in "${devs[@]}"
 do
 	echo "Packaging $dev..."
-	cp "kbuild-$dev/arch/arm/boot/zImage" "installer/rd/zImage"
+	cp "kbuild-$KVER-$dev/arch/arm/boot/zImage" "installer/rd/zImage"
 	rm -f installer/system/lib/modules/*
-	find "kbuild-$dev" -name '*.ko' -exec cp '{}' installer/system/lib/modules ';'
+	find "kbuild-$KVER-$dev" -name '*.ko' -exec cp '{}' installer/system/lib/modules ';'
 	gbt "$dev"
 	rm -f "$izip"
 	mkdir -p "$(dirname "$izip")"
 	(cd installer && zip -qr "../$izip" *)
 	echo "Created $izip"
-	cp "kbuild-$dev/System.map" "${izip%zip}map"
+	cp "kbuild-$KVER-$dev/System.map" "${izip%zip}map"
 	echo "Saved $dev System.map"
 	sbi="$(stat -c %s installer/rd/zImage)"
 	let sd="$(du -b -d0 installer | cut -f 1)-$sbi"
@@ -284,8 +287,7 @@ then
 				flashdev="$(adbsh 'getprop ro.product.device')" || \
 				flashdev="$(adbsh 'sed -n "/^ro.product.device/{s/.*=//;p}" /default.prop')"
 			fi
-			[[ "$flashdev" ]] &&
-			[[ "${devs[*]}" == *"$flashdev"* ]] || \
+			[[ "$flashdev" && "${devs[*]}" == *"$flashdev"* ]] || \
 				NONL=y askyn "No suitable device connected.  Retry?" || \
 				break
 		done
