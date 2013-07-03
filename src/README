@@ -1,0 +1,7 @@
+The files in this directory are intended for creating minimalist installation
+zips.
+
+repack.c is a much smaller (but functionally equivalent) rewrite of the
+AnyKernel installation method.  Rather than unpacking and repacking boot.img
+files, it directly combines the relevant sections.  Its depends on bootimg.h
+from AOSP (the included version is taken from CM, but should be unchanged).

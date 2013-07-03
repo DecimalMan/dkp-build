@@ -1,5 +1,4 @@
 #!/bin/bash -e
-
 ### CONFIGURABLE SETTINGS: ###
 
 # Kernel source location, relative to massbuild.sh
@@ -17,8 +16,7 @@ RNAME=dkp-$KVER
 ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 # Format used for filenames, relative to massbuild.sh
 ZIPFMT=('out/$rtype-$bdate/$RNAME-$dev-$bdate.zip' \
-	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip' \
-	'out/$rtype-$bdate/uninstall-$RNAME-$bdate.zip')
+	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip')
 # Devices available to build for
 ALLDEVS=(d2att d2att-d2tmo d2cri d2spr d2usc d2vzw)
 DEFDEVS=(d2att-d2tmo d2spr d2usc d2vzw)
@@ -37,14 +35,11 @@ FLASH=external
 
 # Dev-Host upload configs as ('release_val' 'experimental_val')
 # DHUSER and DHPASS should be set in devhostauth.sh
-# Upload directory, must already exist
-DHDIRS=("/dkp-$KVER" "/dkp-$KVER-wip")
-# Make public (1 = public, 0 = private)
-DHPUB=(1 1)
-# Upload description ('release' 'experimental' 'uninstaller')
+DHPATH=('/dkp/$dev/$RNAME/Stable Builds/$RNAME $(date +%F) stable.zip' \
+	'/dkp/$dev/$RNAME/Testing Builds/$RNAME $(date +%F) testing$([[ "$ENAME" == dkp* ]] || echo " ($ENAME branch)").zip')
+# Upload description ('release' 'experimental')
 DHDESC=('$RNAME $(date +%x) release for $dev' \
-	'$RNAME $ENAME branch test build for $dev' \
-	'$RNAME $(date +%x) uninstaller')
+	'$RNAME test build for $dev (from branch $ENAME)')
 
 ###  END OF CONFIGURABLES  ###
 
@@ -56,7 +51,7 @@ export CROSS_COMPILE=../hybrid-toolchain/bin/arm-linux-gnueabi-
 # Quick prompt
 askyn() { echo; read -n 1 -p "$* "; echo ${NONL:+-n}; [[ "$REPLY" == [Yy] ]]; }
 # Set output vars
-gbt() { { $EXP && btype="experimental"; } || { [[ "${STABLE[*]}" == *"$1"* ]] && btype="release"; } || btype="testing"; dev="$1" eval izip="$ZIPFMT"; }
+gbt() { dev="$1" eval izip="$ZIPFMT"; }
 # Fancy termination messages
 die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
 # ADB shell with return value
@@ -67,6 +62,7 @@ cd "$(dirname "$(readlink -f "$0")")"
 CF=false
 CL=false
 EXP=true
+BLD=true
 PKG=true
 FL=false
 DH=false
@@ -85,6 +81,7 @@ do
 	(C|--clean) CL=true;;
 	(f|--flash) FL=true;;
 	(n|--no-package) PKG=false;;
+	(N|--no-build) BLD=false;;
 	(--no-really) BOGUS_ERRORS=true;;
 	(r|--release) EXP=false;;
 	(u|--upload) DH=true;;
@@ -100,6 +97,7 @@ do
 			-C (--clean): make clean for each device before building
 			-f (--flash): automagically flash
 			-n (--no-package): just build, don't package
+			-N (--no-build): don't rebuild the kernel
 			-r (--release): package builds for release; generate uninstaller
 			-u (--upload): upload builds to Dev-Host
 			EOF
@@ -107,7 +105,7 @@ do
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if [[ "$1" == --* ]] || ! getopts "cCflnru" v "$1"
+	if [[ "$1" == --* ]] || ! getopts "cCflnNru" v "$1"
 	then
 		shift
 		v="$1"
@@ -127,9 +125,10 @@ then
 else
 	bdate="$(date +%Y%m%d)"
 	rtype="release"
-	eval uzip="${ZIPFMT[2]}"
 fi
 
+if $BLD
+then
 # Use the make jobserver to sort out building everything
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
@@ -140,12 +139,14 @@ m="$(which lmake gmake make 2>&- | head -n 1)" || true
 "$m" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
 if [[ "$cfg" ]]
 then mj=
-else mj="-j $(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
+else
+	pc="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
+	mj="-j $pc LTO_PARTITIONS=$((2*pc/${#devs[@]}))"
 fi
 if ! "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
 ${devs[@]}:
 	@mkdir -p "kbuild-$KVER-\$@"
-	@touch "build-failed-\$@"
+	@touch ".build-failed-\$@"
 	@rm -f "build-\$@.log"
 	$($CL && \
 	echo "@echo Cleaning \$@..." && \
@@ -172,15 +173,15 @@ ${devs[@]}:
 	echo "	@find \"kbuild-$KVER-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"build-\$@.log\"" && \
 	echo "	@echo \"Finished building \$@.\""
 	)
-	@rm -f "build-failed-\$@"
+	@rm -f ".build-failed-\$@"
 .PHONY: ${devs[@]}
 EOF
 )
 then
 	askyn "Review build logs for failed builds?" && \
-		less $(ls build-failed-* | \
-		sed 's/build-failed-\([^ ]*\)/build-\1.log/')
-	rm -f build-failed-*
+		less $(ls .build-failed-* | \
+		sed 's/\.build-failed-\([^ ]*\)/build-\1.log/')
+	rm -f .build-failed-*
 	die 1 "building failed."
 fi
 
@@ -191,6 +192,7 @@ $EXP && askyn "Review build logs?" && \
 
 echo
 $PKG || die 0 "packaging disabled by --no-package."
+fi
 
 # Package everything.  Ramdisk is borrowed from the existing kernel so I don't
 # have to keep CM sources around.  boot.img is generated first to avoid
@@ -236,44 +238,16 @@ do
 	mkdir -p "$(dirname "$izip")"
 	(cd installer && zip -qr "../$izip" *)
 	echo "Created $izip"
-	cp "kbuild-$KVER-$dev/System.map" "${izip%zip}map"
-	echo "Saved $dev System.map"
+	if $DH
+	then
+		cp "kbuild-$KVER-$dev/System.map" "${izip%zip}map"
+		echo "Saved $dev System.map"
+	fi
 	sbi="$(stat -c %s installer/rd/zImage)"
 	let sd="$(du -b -d0 installer | cut -f 1)-$sbi"
 	sz="$(stat -c %s "$izip")"
 	echo "zImage: $sbi; data: $sd; zip: $sz"
 done
-
-if ! $EXP
-then
-	echo "Generating uninstall script..."
-	cat >uninstaller/META-INF/com/google/android/updater-script <<-EOF
-		ui_print("mounting system");
-		run_program("/sbin/busybox", "mount", "/system");
-		ui_print("cleaning modules");
-		$(for f in installer/system/lib/modules/*
-		do echo "delete(\"${f#installer}\");"
-		done)
-		ui_print("cleaning initscripts");
-		$(for f in installer/system/etc/init.d/*
-		do echo "delete(\"${f#installer}\");"
-		done
-		)$(ls installer/system/xbin/* &>/dev/null && echo && \
-		echo "ui_print(\"cleaning binaries\");" && \
-		for f in installer/system/xbin/*
-		do echo "delete(\"${f#installer}\");"
-		done
-		)$(ls installer/system/etc/init.qcom.post_boot.sh &>/dev/null && echo && \
-		echo 'set_perm(0, 0, 0755, "/system/etc/init.qcom.post_boot.sh");'
-		)
-		ui_print("unmounting system");
-		run_program("/sbin/busybox", "umount", "/system");
-	EOF
-	echo "Packaging uninstaller..."
-	rm -f "$uzip"
-	(cd uninstaller && zip -qr "../$uzip" *)
-	echo "Created $uzip"
-fi
 
 if $FL
 then
@@ -321,23 +295,8 @@ then
 	fi
 fi
 
-if $DH
+if $DH && askyn "Upload to Dev-Host?"
 then
-	askyn "Upload to Dev-Host?" || exit 0
-	if $EXP
-	then
-		dha=()
-		dhidx=1
-	else
-		dha=(-F "files[]=@$uzip" -F "file_description[]=$(eval echo "${DHDESC[2]}")")
-		dhidx=0
-	fi
-	for dev in "${devs[@]}"
-	do
-		gbt "$dev"
-		dha=("${dha[@]}" -F "files[]=@$izip" \
-			-F "file_description[]=$(eval echo "${DHDESC[$dhidx]}")")
-	done
 	[[ -r devhostauth.sh ]] && . ./devhostauth.sh || true
 	if ! [[ "$DHUSER" && "$DHPASS" ]]
 	then
@@ -345,17 +304,60 @@ then
 		read -s -p 'Dev-Host password: ' DHPASS
 		echo
 	fi
+	if $EXP
+	then dhidx=1
+	else dhidx=0
+	fi
 	echo "Logging in as $DHUSER..."
-	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o /dev/null d-h.st)" || \
+	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o dh.html d-h.st)" || \
 		die 1 "couldn't log in."
-	html="$(curl -s -b <(echo "$cookies") d-h.st)" || \
-		die 1 "couldn't fetch upload page."
-	dirid="$(sed -n '/<select name="uploadfolder"/ { : nl; n; s/.*<option value="\([0-9]\+\)">'"${DHDIRS[$dhidx]//\//\\/}"'<\/option>.*/\1/; t pq; s/<\/select>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
-		die 1 "couldn't find folder ${DHDIRS[$dhidx]}."
-	action="$(sed -n '/<div class="file-upload"/ { : nl; n; s/.*<form.*action="\([^"]*\)".*/\1/; t pq; s/<\/form>//; T nl; q 1; : pq; p; q; }' <<<"$html")" || \
-		die 1 "couldn't determine upload URL."
-	userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")" || \
-		die 1 "couldn't determine user id."
-	curl -F "UPLOAD_IDENTIFIER=${action##*=}" -F "action=upload" -F "uploadfolder=$dirid" -F "public=${DHPUB[$dhidx]}" -F "user_id=$userid" "${dha[@]}" -b <(echo "$cookies") "$action" -o /dev/null || \
-		die 1 "upload unsuccessful."
+	for dev in "${devs[@]}"
+	do
+		gbt "$dev"
+		html="$(curl -s -b <(echo "$cookies") d-h.st)" || \
+			die 1 "couldn't fetch upload page."
+		id=0
+		IFS=/ read -a c < <(eval echo "${DHPATH[$dhidx]}")
+		set -- "${c[@]}"
+		[[ "$1" ]] || shift
+		[[ "$2" ]] && {
+		p="\\/$1"
+		# This really needs to be optimized, but I'm lazy
+		while new="$(sed -n '/<select name="uploadfolder"/ {
+			: nl; n;
+			s/.*<option value="\([0-9]\+\)">'"$p"'<\/option>.*/\1/; t pq;
+			s/<\/select>//; T nl; q 1;
+			: pq; p; q; }' <<<"$html")" \
+			&& [[ "$2" ]]
+		do shift; p="$p\\/$1"; id="$new"; done
+		while [[ "$2" ]]
+		do	id="$(curl -s -b <(echo "$cookies") \
+				-F "action=createfolder" \
+				-F "fld_parent_id=$id" \
+				-F "fld_name=$1" \
+				d-h.st)"
+			shift
+		done
+		}
+		action="$(sed -n '/<div class="file-upload"/ {
+			: nl; n;
+			s/.*<form.*action="\([^"]*\)".*/\1/; t pq;
+			s/<\/form>//; T nl; q 1;
+			: pq; p; q; }' <<<"$html")" || \
+			die 1 "couldn't determine upload URL."
+		userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")" || \
+			die 1 "couldn't determine user id."
+		echo "Beginning upload of ${izip}..."
+		curl -s -b <(echo "$cookies") \
+			-F "UPLOAD_IDENTIFIER=${action##*=}" \
+			-F "action=upload" \
+			-F "uploadfolder=$id" \
+			-F "public=1" \
+			-F "user_id=$userid" \
+			-F "files[]=@$izip;filename=$1" \
+			-F "file_description[]=$(eval echo "\"${DHDESC[$dhidx]}\"")" \
+			"$action" -o /dev/null &
+	done
+	wait
+	echo "All uploads completed!"
 fi
