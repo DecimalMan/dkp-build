@@ -98,7 +98,7 @@ do
 			-f (--flash): automagically flash
 			-n (--no-package): just build, don't package
 			-N (--no-build): don't rebuild the kernel
-			-r (--release): package builds for release; generate uninstaller
+			-r (--release): package builds as release
 			-u (--upload): upload builds to Dev-Host
 			EOF
 			exit 1
