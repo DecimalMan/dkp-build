@@ -141,7 +141,15 @@ if [[ "$cfg" ]]
 then mj=
 else
 	pc="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
-	mj="-j $pc LTO_PARTITIONS=$((2*pc/${#devs[@]}))"
+	if which lmake >/dev/null 2>&1
+	then
+		mt="$(sed -n '/MemTotal/{s/[^0-9]//g;p}' /proc/meminfo)"
+		((lp=27962026*pc/mt, lp=lp>32?32:lp<pc?pc:lp))
+		echo "Building with $lp LTO partitions..."
+		mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
+	else
+		mj="-j$pc"
+	fi
 fi
 if ! "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
 ${devs[@]}:
