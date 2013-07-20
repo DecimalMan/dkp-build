@@ -49,7 +49,9 @@ export CROSS_COMPILE=../hybrid-toolchain/bin/arm-linux-gnueabi-
 #export CROSS_COMPILE=../hybrid-4_7-toolchain/bin/arm-linux-gnueabi-
 
 # Quick prompt
-askyn() { echo; read -n 1 -p "$* "; echo ${NONL:+-n}; [[ "$REPLY" == [Yy] ]]; }
+askyn() { while :; do echo
+	read -n 1 -p "$* "; [[ "$REPLY" == [YyNn] ]] && break; done
+	echo ${NONL:+-n}; [[ "$REPLY" == [Yy] ]]; }
 # Set output vars
 gbt() { dev="$1" eval izip="$ZIPFMT"; }
 # Fancy termination messages
