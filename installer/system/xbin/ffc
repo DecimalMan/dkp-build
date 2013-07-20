@@ -1,8 +1,0 @@
-#!/system/bin/sh
-state=(OFF ON)
-ffc=/sys/kernel/fast_charge/force_fast_charge
-let v=1-`cat $ffc`
-if echo $v >$ffc
-then echo "Fast USB Charge: ${state[$v]}"
-else echo "Couldn't toggle Fast USB Charge!"
-fi
