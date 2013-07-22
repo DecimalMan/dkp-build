@@ -135,6 +135,10 @@ then
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
 KB="\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-$KVER-\$@\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
+if [[ "$TW" == "yup" ]]
+then dc="$CFGFMT"
+else dc="VARIANT_DEFCONFIG=$CFGFMT SELINUX_DEFCONFIG=m2selinux_defconfig cyanogen_d2_defconfig"
+fi
 # Explicitly use lto-fixed GNU make when available.
 m="$(which lmake gmake make 2>&- | head -n 1)" || true
 [[ "$m" ]] || die 1 "make not found; can't build."
@@ -169,7 +173,7 @@ ${devs[@]}:
 		echo "	@$KB -s $cfg 2>>\"build-\$@.log\""
 	else
 		echo "	@echo Making $CFGFMT..." && \
-		echo "	@$KB $CFGFMT &>>\"build-\$@.log\""
+		echo "	@$KB $dc &>>\"build-\$@.log\""
 	fi
 	)$(! [[ "$cfg" ]] && \
 	echo && \
