@@ -1,19 +1,20 @@
 #!/bin/bash -e
 ### CONFIGURABLE SETTINGS: ###
 
-# Kernel source location, relative to massbuild.sh
-KSRC=../dkp
-KVER="$(sed -n '1{s/.*= //;h;n;s/.*= /./;H;x;s/\n//;p;q}' "$KSRC/Makefile")"
-if [ "$TW" == "yup" ]
-then
-	KSRC=../tw
-	KVER=tw
-fi
 # Kernel version username
 export KBUILD_BUILD_USER=decimalman
-# Kernel name used for filenames
-RNAME=dkp-$KVER
+
+# Kernel source location, relative to massbuild.sh
+if [[ "$TW" == "yup" ]]
+then KSRC=../tw
+else KSRC=../dkp
+fi
+
+# Kernel name used for paths/filenames
+RPATH="$(sed -n '/^DKP_LABEL/{s/[^=]*=\W*//;p}' $KSRC/Makefile)"
+RNAME="$(sed -n '/^DKP_NAME/{s/[^=]*=\W*//;p}' $KSRC/Makefile)"
 ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
+
 # Format used for filenames, relative to massbuild.sh
 ZIPFMT=('out/$rtype-$bdate/$RNAME-$dev-$bdate.zip' \
 	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip')
@@ -35,8 +36,8 @@ FLASH=external
 
 # Dev-Host upload configs as ('release_val' 'experimental_val')
 # DHUSER and DHPASS should be set in devhostauth.sh
-DHPATH=('/dkp/$dev/$RNAME/Stable Builds/$RNAME $(date +%F) stable.zip' \
-	'/dkp/$dev/$RNAME/Testing Builds/$RNAME $(date +%F) testing$([[ "$ENAME" == dkp* ]] || echo " ($ENAME branch)").zip')
+DHPATH=('/dkp/$dev/$RPATH/Stable Builds/$RNAME $(date +%F) stable.zip' \
+	'/dkp/$dev/$RPATH/Testing Builds/$RNAME $(date +%F) testing$([[ "$ENAME" == dkp* ]] || echo " ($ENAME branch)").zip')
 # Upload description ('release' 'experimental')
 DHDESC=('$RNAME $(date +%x) release for $dev' \
 	'$RNAME test build for $dev (from branch $ENAME)')
