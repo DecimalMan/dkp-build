@@ -46,6 +46,7 @@ DHDESC=('$RNAME $(date +%x) release for $dev' \
 
 devs=()
 flashdev=
+#export CROSS_COMPILE=../hybrid-toolchain/bin/arm-linux-eabi-
 export CROSS_COMPILE=../hybrid-toolchain/bin/arm-linux-gnueabi-
 #export CROSS_COMPILE=../hybrid-4_7-toolchain/bin/arm-linux-gnueabi-
 
@@ -135,7 +136,7 @@ then
 # Use the make jobserver to sort out building everything
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
-KB="\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-$KVER-\$@\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
+KB="\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-$RNAME-\$@\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
 if [[ "$TW" == "yup" ]]
 then dc="$CFGFMT"
 else dc="VARIANT_DEFCONFIG=$CFGFMT SELINUX_DEFCONFIG=m2selinux_defconfig cyanogen_d2_defconfig"
@@ -160,7 +161,7 @@ else
 fi
 if ! "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
 ${devs[@]}:
-	@mkdir -p "kbuild-$KVER-\$@"
+	@mkdir -p "kbuild-$RNAME-\$@"
 	@touch ".build-failed-\$@"
 	@rm -f "build-\$@.log"
 	$($CL && \
@@ -179,13 +180,13 @@ ${devs[@]}:
 	)$(! [[ "$cfg" ]] && \
 	echo && \
 	echo "	@echo Making all for \$@..." && \
-	echo "	@rm -f \"kbuild-$KVER-\$@/.version\"" && \
+	echo "	@rm -f \"kbuild-$RNAME-\$@/.version\"" && \
 	(if $BOGUS_ERRORS
 	then echo "	@until $KB &>>\"build-\$@.log\"; do :; done"
 	else echo "	@$KB &>>\"build-\$@.log\""
 	fi) && \
 	echo "	@echo Stripping \$@ modules..." && \
-	echo "	@find \"kbuild-$KVER-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"build-\$@.log\"" && \
+	echo "	@find \"kbuild-$RNAME-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"build-\$@.log\"" && \
 	echo "	@echo \"Finished building \$@.\""
 	)
 	@rm -f ".build-failed-\$@"
@@ -245,9 +246,9 @@ EOF
 for dev in "${devs[@]}"
 do
 	echo "Packaging $dev..."
-	cp "kbuild-$KVER-$dev/arch/arm/boot/zImage" "installer/rd/zImage"
+	cp "kbuild-$RNAME-$dev/arch/arm/boot/zImage" "installer/rd/zImage"
 	rm -f installer/system/lib/modules/*
-	find "kbuild-$KVER-$dev" -name '*.ko' -exec cp '{}' installer/system/lib/modules ';'
+	find "kbuild-$RNAME-$dev" -name '*.ko' -exec cp '{}' installer/system/lib/modules ';'
 	gbt "$dev"
 	rm -f "$izip"
 	mkdir -p "$(dirname "$izip")"
@@ -255,7 +256,7 @@ do
 	echo "Created $izip"
 	if $DH
 	then
-		cp "kbuild-$KVER-$dev/System.map" "${izip%zip}map"
+		cp "kbuild-$RNAME-$dev/System.map" "${izip%zip}map"
 		echo "Saved $dev System.map"
 	fi
 	sbi="$(stat -c %s installer/rd/zImage)"
