@@ -26,11 +26,6 @@ STABLE=(d2spr)
 # defconfig format, will be expanded per-device
 CFGFMT='cyanogen_$@_defconfig'
 
-# boot.img kernel command line.  Without STRICT_RWX, RDO can be reduced (CM
-# uses 0x0130000).
-BOOTCLI='console = null androidboot.hardware=qcom user_debug=31 zcache'
-BOOTRDO='0x1500000'
-
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
 
@@ -46,8 +41,8 @@ DHDESC=('$RNAME $(date +%x) release for $dev' \
 
 devs=()
 flashdev=
-#export CROSS_COMPILE=../hybrid-toolchain/bin/arm-linux-eabi-
-export CROSS_COMPILE=../hybrid-toolchain/bin/arm-linux-gnueabi-
+export CROSS_COMPILE=../hybrid-toolchain/bin/arm-eabi-
+#export CROSS_COMPILE=../hybrid-toolchain-20130706/bin/arm-linux-gnueabi-
 #export CROSS_COMPILE=../hybrid-4_7-toolchain/bin/arm-linux-gnueabi-
 
 # Quick prompt
@@ -215,16 +210,14 @@ fi
 # overwriting existing modules on failure.
 echo "Generating install script..."
 cat >installer/META-INF/com/google/android/updater-script <<-EOF
-	ui_print("generating boot.img");
+	ui_print("flashing kernel");
 	run_program("/sbin/mkdir", "-p", "/cache/rd");
 	package_extract_dir("rd", "/cache/rd");
 	set_perm(0, 0, 0755, "/cache/rd/repack");
 	run_program("/cache/rd/repack",
 		"/dev/block/mmcblk0p7",
-		"/cache/rd/zImage",
-		"/cache/rd/boot.img",
-		"$BOOTRDO",
-		"$BOOTCLI");
+		"/cache/rd/zImage");
+	delete_recursive("/cache/rd");
 	ui_print("mounting system");
 	run_program("/sbin/busybox", "mount", "/system");
 	ui_print("copying modules & initscripts");
@@ -239,9 +232,6 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	done)
 	ui_print("unmounting system");
 	unmount("/system");
-	ui_print("flashing kernel");
-	write_raw_image("/cache/rd/boot.img", "/dev/block/mmcblk0p7");
-	delete_recursive("/cache/rd");
 EOF
 for dev in "${devs[@]}"
 do

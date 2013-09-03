@@ -10,7 +10,7 @@ Notable features:
 
 - Fast multi-device rebuilds, thanks to multiple out-of-tree build directories
 - Top-level make jobserver for efficient parallel building
-- Automatic generation of install & uninstall zips, with automatic handling of xbin and initscripts
+- Automatic generation of install zips, with automatic handling of xbin and initscripts
 - Install zip automatically builds boot.img using new zImage and existing ramdisk
 - Automatic flashing to an attached device
 - Automatic versioning of builds
@@ -31,6 +31,12 @@ Usage:
 ------
 
 Try ```./massbuild.sh --help```.  My typical usage is ```./massbuild.sh -f d2spr``` until everything works, then ```./massbuild.sh -ru``` to publish a new release.  ```./massbuild.sh -Cc``` is handy when switching between Linux versions.
+
+Extras:
+-------
+
+- src/repack.c: inject a new zImage into an existing kernel partition
+- src/tiny-vmin.c: an update-binary replacement to mangle dkp's minimum voltage initscript
 
 TODO:
 -----
