@@ -7,7 +7,7 @@ KSRC=../android_kernel_samsung_d2
 # Kernel version username
 export KBUILD_BUILD_USER=decimalman
 # Kernel name used for filenames
-RNAME=dkp
+RNAME=dkp-3.4
 ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 # Format used for filenames, relative to massbuild.sh
 ZIPFMT=('out/$rtype-$bdate/$name-$btype-$dev-$bdate.zip' \
@@ -31,7 +31,7 @@ FLASH=external
 # Dev-Host upload configs as ('release_val' 'experimental_val')
 # DHUSER and DHPASS should be set in devhostauth.sh
 # Upload directory, must already exist
-DHDIRS=(/dkp /dkp-wip)
+DHDIRS=(/dkp-3.4 /dkp-3.4-wip)
 # Make public (1 = public, 0 = private)
 DHPUB=(1 1)
 # Upload description ('release' 'experimental' 'uninstaller')
