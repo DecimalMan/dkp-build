@@ -15,14 +15,17 @@
  */
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <fcntl.h>
 #include <string.h>
+#include <sys/ioctl.h>
+#include <linux/fs.h>
 
 #include "bootimg.h"
 
+#define KBASE (0x80200000)
 #define RDOFF (0x1500000)
 #define PGSZ (2048)
-#define SZLIM (8<<20)
 
 /* Calculate pagesize-padded file offset */
 static inline void pad_section_offset(int *pos, int len, int pagesize) {
@@ -50,12 +53,14 @@ int main(int argc, char **argv) {
 	struct boot_img_hdr old_hdr;
 	struct boot_img_hdr new_hdr = {
 		.magic		= BOOT_MAGIC,
-		.kernel_addr	= 0x80208000,
-		.tags_addr	= 0x80200100,
+		.kernel_addr	= KBASE + 0x8000,
+		.ramdisk_addr	= KBASE + RDOFF,
+		.tags_addr	= KBASE + 0x100,
 		.page_size	= PGSZ,
 	};
 	int kf, zf;
 	int kp;
+	uint64_t szlim;
 
 	int i;
 	char *rd, *zimg;
@@ -85,7 +90,6 @@ int main(int argc, char **argv) {
 	memcpy(new_hdr.name, old_hdr.name, BOOT_NAME_SIZE);
 	memcpy(new_hdr.cmdline, old_hdr.cmdline, BOOT_ARGS_SIZE);
 	new_hdr.ramdisk_size = old_hdr.ramdisk_size;
-	new_hdr.ramdisk_addr = new_hdr.kernel_addr + RDOFF - 0x8000;
 	new_hdr.kernel_size = lseek(zf, 0, SEEK_END);
 	if (new_hdr.kernel_size < 0)
 		return 1;
@@ -94,7 +98,9 @@ int main(int argc, char **argv) {
 	i = PGSZ;
 	pad_section_offset(&i, new_hdr.kernel_size, PGSZ);
 	pad_section_offset(&i, new_hdr.ramdisk_size, PGSZ);
-	if (i > SZLIM)
+	if (ioctl(kf, BLKGETSIZE64, &szlim) == -1)
+		return 1;
+	if (i > szlim)
 		return 1;
 
 	// Locate & read in old ramdisk
@@ -126,10 +132,10 @@ int main(int argc, char **argv) {
 	}
 
 	// Write the new kernel
-	kp = lseek(zf, 0, SEEK_SET);
+	kp = lseek(kf, 0, SEEK_SET);
 	if (kp)
 		return 1;
-	write_section(&new_hdr, sizeof(struct boot_img_hdr));
+	write_section((char *)&new_hdr, sizeof(struct boot_img_hdr));
 	write_section(zimg, new_hdr.kernel_size);
 	write_section(rd, new_hdr.ramdisk_size);
 

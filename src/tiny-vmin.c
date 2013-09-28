@@ -51,6 +51,8 @@ int main(int argc, char **argv) {
 			for (e = s; *e >= '0' && *e <= '9'; e++);
 			if (*e == '.')
 				*e = 0;
+			else
+				e = NULL;
 		}
 		if (!e)
 			s = vmin;

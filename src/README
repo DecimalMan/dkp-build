@@ -5,3 +5,8 @@ repack.c is a much smaller (but functionally equivalent) rewrite of the
 AnyKernel installation method.  Rather than unpacking and repacking boot.img
 files, it directly combines the relevant sections.  Its depends on bootimg.h
 from AOSP (the included version is taken from CM, but should be unchanged).
+
+tiny-vmin.c is a drop-in replacement for update-binary to adjust (or more
+accurately, to replace) the minimum voltage initscript used by dkp.  It uses a
+few tricks that aren't possible with Google's update-binary, and compiles into
+a miniscule binary.
