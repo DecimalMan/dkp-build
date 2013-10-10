@@ -65,6 +65,7 @@ BLD=true
 PKG=true
 FL=false
 DH=false
+KO=false
 BOGUS_ERRORS=false
 cfg=
 v="$1"
@@ -79,6 +80,7 @@ do
 		{ cfg="$2"; s="$1"; shift 2; set -- "$s" "$@"; };;
 	(C|--clean) CL=true;;
 	(f|--flash) FL=true;;
+	(m|--modules) KO=true; PKG=false;;
 	(n|--no-package) PKG=false;;
 	(N|--no-build) BLD=false;;
 	(--no-really) BOGUS_ERRORS=true;;
@@ -104,7 +106,7 @@ do
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if [[ "$1" == --* ]] || ! getopts "cCflnNru" v "$1"
+	if [[ "$1" == --* ]] || ! getopts "cCflmnNru" v "$1"
 	then
 		shift
 		v="$1"
@@ -131,13 +133,13 @@ then
 # Use the make jobserver to sort out building everything
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
-KB="\$(MAKE) -C \"$KSRC\" O=\"$PWD/kbuild-$RNAME-\$@\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
+KB="\$(MAKE) -S -C \"$KSRC\" O=\"$PWD/kbuild-$RNAME-\$@\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
 if [[ "$TW" == "yup" ]]
 then dc="$CFGFMT"
 else dc="VARIANT_DEFCONFIG=$CFGFMT SELINUX_DEFCONFIG=m2selinux_defconfig cyanogen_d2_defconfig"
 fi
-# Explicitly use lto-fixed GNU make when available.
-m="$(which lmake gmake make 2>&- | head -n 1)" || true
+# Explicitly use GNU make when available.
+m="$(which gmake make 2>&- | head -n 1)" || true
 [[ "$m" ]] || die 1 "make not found; can't build."
 "$m" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
 if [[ "$cfg" ]]
@@ -174,11 +176,11 @@ ${devs[@]}:
 	fi
 	)$(! [[ "$cfg" ]] && \
 	echo && \
-	echo "	@echo Making all for \$@..." && \
+	echo "	@echo Making $($KO && echo modules || echo all) for \$@..." && \
 	echo "	@rm -f \"kbuild-$RNAME-\$@/.version\"" && \
 	(if $BOGUS_ERRORS
-	then echo "	@until $KB &>>\"build-\$@.log\"; do :; done"
-	else echo "	@$KB &>>\"build-\$@.log\""
+	then echo "	@until $KB $($KO && echo modules) &>>\"build-\$@.log\"; do :; done"
+	else echo "	@$KB $($KO && echo modules) &>>\"build-\$@.log\""
 	fi) && \
 	echo "	@echo Stripping \$@ modules..." && \
 	echo "	@find \"kbuild-$RNAME-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"build-\$@.log\"" && \
@@ -202,7 +204,7 @@ $EXP && askyn "Review build logs?" && \
 		less $(sed 's/\(^\| \)\([^ ]*\)/build-\2.log /g' <<<"${devs[*]}")
 
 echo
-$PKG || die 0 "packaging disabled by --no-package."
+$PKG || die 0 "packaging disabled by --$($KO && echo modules || echo no-package)."
 fi
 
 # Package everything.  Ramdisk is borrowed from the existing kernel so I don't
