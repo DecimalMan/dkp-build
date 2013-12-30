@@ -19,8 +19,8 @@ ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 ZIPFMT=('out/$rtype-$bdate/$RNAME-$dev-$bdate.zip' \
 	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip')
 # Devices available to build for
-ALLDEVS=(d2att d2att-d2tmo d2cri d2spr d2usc d2vzw)
-DEFDEVS=(d2att-d2tmo d2spr d2usc d2vzw)
+ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
+DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 # Devices that will be be marked 'release' rather than 'testing'
 STABLE=(d2spr)
 # defconfig format, will be expanded per-device
@@ -31,8 +31,8 @@ FLASH=external
 
 # Dev-Host upload configs as ('release_val' 'experimental_val')
 # DHUSER and DHPASS should be set in devhostauth.sh
-DHPATH=('/dkp/$dev/$RPATH/Stable Builds/$RNAME $(date +%F) stable.zip' \
-	'/dkp/$dev/$RPATH/Testing Builds/$RNAME $(date +%F) testing$([[ "$ENAME" == dkp* ]] || echo " ($ENAME branch)").zip')
+DHPATH=('/dkp/$dev/$RPATH/Stable Builds/$RNAME-$(date +%F)-stable.zip' \
+	'/dkp/$dev/$RPATH/Testing Builds/$RNAME-$(date +%F)-testing$([[ "$ENAME" == dkp* ]] || echo "-($ENAME-branch)").zip')
 # Upload description ('release' 'experimental')
 DHDESC=('$RNAME $(date +%x) release for $dev' \
 	'$RNAME test build for $dev (from branch $ENAME)')
@@ -51,6 +51,8 @@ askyn() { while :; do echo
 	echo ${NONL:+-n}; [[ "$REPLY" == [Yy] ]]; }
 # Set output vars
 gbt() { dev="$1" eval izip="$ZIPFMT"; }
+# Complete device name; fail on multiple matches
+cdn() { local dn=($(grep -o "[-a-z0-9]*$1[-a-z0-9]*" <<<"${ALLDEVS[*]}")); [[ ${#dn[*]} == 1 ]] && dev="${dn[0]}"; }
 # Fancy termination messages
 die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
 # ADB shell with return value
@@ -87,8 +89,8 @@ do
 	(r|--release) EXP=false;;
 	(u|--upload) DH=true;;
 	(-[^-]*);;
-	(*) 	if [[ " ${ALLDEVS[*]} " == *" $v "* ]]
-		then devs=("${devs[@]}" "$v")
+	(*) 	if cdn "$v"
+		then devs=("${devs[@]}" "$dev")
 		else
 			cat >&2 <<-EOF
 			Usage: $0 [options] [devices]
@@ -145,15 +147,18 @@ m="$(which gmake make 2>&- | head -n 1)" || true
 if [[ "$cfg" ]]
 then mj=
 else
-	pc="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
-	if which lmake >/dev/null 2>&1
-	then
+	if [[ "$MAKEJOBS" ]]
+	then pc="$MAKEJOBS"
+	else pc="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
+	fi
+	if [[ "$LTOPART" ]]
+	then mj="-j$pc CONFIG_LTO_PARTITIONS=$LTOPART"
+	else
 		mt="$(sed -n '/MemTotal/{s/[^0-9]//g;p}' /proc/meminfo)"
-		((lp=27962026*pc/mt, lp=lp>32?32:lp<pc?pc:lp))
+		#((lp=27962026*pc/mt, lp=lp>32?32:lp<pc?pc:lp))
+		((lp=31457280*pc/mt, lp=lp>32?32:lp<pc?pc:lp))
 		echo "Building with $lp LTO partitions..."
 		mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
-	else
-		mj="-j$pc"
 	fi
 fi
 if ! "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
@@ -173,8 +178,7 @@ ${devs[@]}:
 	else
 		echo "	@echo Making $CFGFMT..." && \
 		echo "	@$KB $dc &>>\"build-\$@.log\""
-	fi
-	)$(! [[ "$cfg" ]] && \
+	fi)$(! [[ "$cfg" ]] && \
 	echo && \
 	echo "	@echo Making $($KO && echo modules || echo all) for \$@..." && \
 	echo "	@rm -f \"kbuild-$RNAME-\$@/.version\"" && \
@@ -231,7 +235,9 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	)$(ls installer/system/xbin/* &>/dev/null && echo && \
 	for f in installer/system/xbin/*
 	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
-	done)
+	done)$([[ "$RNAME" == "dkp-tw43" ]] && echo && \
+	echo 'ui_print("fixing selinux contexts");' && \
+	echo 'delete("/system/etc/selinux_restore");')
 	ui_print("unmounting system");
 	unmount("/system");
 EOF
@@ -269,9 +275,10 @@ then
 				flashdev="$(adbsh 'getprop ro.product.device')" || \
 				flashdev="$(adbsh 'sed -n "/^ro.product.device/{s/.*=//;p}" /default.prop')"
 			fi
-			[[ "$flashdev" && "${devs[*]}" == *"$flashdev"* ]] || \
+			cdn "$flashdev" && [[ "${devs[*]}" == *"$dev"* ]] || \
 				NONL=y askyn "No suitable device connected.  Retry?" || \
 				break
+			flashdev="$dev"
 		done
 		echo
 		if [[ "$flashdev" ]]
@@ -287,6 +294,11 @@ then
 			[[ "$flashdir" ]] || \
 				die 1 "can't find device's $FLASH storage."
 
+			if [[ "$FLASH" == "internal" ]]
+			then recdir="/sdcard"
+			else recdir="/storage/sdcard1"
+			fi
+
 			gbt "$flashdev"
 			# adb always returns 0, which sucks.
 			adbsh "mkdir -p '$flashdir/massbuild/'"
@@ -294,7 +306,7 @@ then
 			adb -d push "$izip" "$flashdir/massbuild/$(basename "$izip")"
 			adbsh "[ -f '$flashdir/massbuild/$(basename "$izip")' ]" >/dev/null
 			echo "Generating OpenRecoveryScript..."
-			inst="echo install massbuild/$(basename "$izip") >/cache/recovery/openrecoveryscript"
+			inst="(echo mount $recdir; echo install $recdir/massbuild/$(basename "$izip"); echo unmount $recdir) >/cache/recovery/openrecoveryscript"
 			(adbsh "su -c '$inst'" || adbsh "$inst") >/dev/null
 			echo "Rebooting to recovery..."
 			adb -d reboot recovery
