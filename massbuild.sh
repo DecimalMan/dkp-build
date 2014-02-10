@@ -19,8 +19,14 @@ ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 ZIPFMT=('out/$rtype-$bdate/$RNAME-$dev-$bdate.zip' \
 	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip')
 # Devices available to build for
-ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
-DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
+if [[ "$RNAME" == "dkp-aosp44" ]]
+then
+	ALLDEVS=(d2)
+	DEFDEVS=(d2)
+else
+	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
+	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
+fi
 # Devices that will be be marked 'release' rather than 'testing'
 STABLE=(d2spr)
 # defconfig format, will be expanded per-device
@@ -214,6 +220,8 @@ fi
 # Package everything.  Ramdisk is borrowed from the existing kernel so I don't
 # have to keep CM sources around.  boot.img is generated first to avoid
 # overwriting existing modules on failure.
+if false
+then
 echo "Generating install script..."
 cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	ui_print("flashing kernel");
@@ -228,23 +236,23 @@ cat >installer/META-INF/com/google/android/updater-script <<-EOF
 	run_program("/sbin/busybox", "mount", "/system");
 	ui_print("copying modules & initscripts");
 	package_extract_dir("system", "/system");
-	ui_print("setting permissions");
-	$(for f in installer/system/etc/init.d/*
+	$(ls installer/system/xbin/* &>/dev/null && \
+	echo "ui_print(\"setting permissions\");" && \
+	for f in installer/system/etc/init.d/*
 	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
 	done
-	)$(ls installer/system/xbin/* &>/dev/null && echo && \
+	)$(ls installer/system/xbin/* &>/dev/null && \
 	for f in installer/system/xbin/*
 	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
-	done)$([[ "$RNAME" == "dkp-tw43" ]] && echo && \
-	echo 'ui_print("fixing selinux contexts");' && \
-	echo 'delete("/system/etc/selinux_restore");')
-	ui_print("unmounting system");
+	done
+	)ui_print("unmounting system");
 	unmount("/system");
 EOF
+fi
 for dev in "${devs[@]}"
 do
 	echo "Packaging $dev..."
-	cp "kbuild-$RNAME-$dev/arch/arm/boot/zImage" "installer/rd/zImage"
+	cp "kbuild-$RNAME-$dev/arch/arm/boot/zImage" "installer/dkp-zImage"
 	rm -f installer/system/lib/modules/*
 	find "kbuild-$RNAME-$dev" -name '*.ko' -exec cp '{}' installer/system/lib/modules ';'
 	gbt "$dev"
@@ -257,7 +265,7 @@ do
 		cp "kbuild-$RNAME-$dev/System.map" "${izip%zip}map"
 		echo "Saved $dev System.map"
 	fi
-	sbi="$(stat -c %s installer/rd/zImage)"
+	sbi="$(stat -c %s installer/dkp-zImage)"
 	let sd="$(du -b -d0 installer | cut -f 1)-$sbi"
 	sz="$(stat -c %s "$izip")"
 	echo "zImage: $sbi; data: $sd; zip: $sz"
@@ -275,10 +283,20 @@ then
 				flashdev="$(adbsh 'getprop ro.product.device')" || \
 				flashdev="$(adbsh 'sed -n "/^ro.product.device/{s/.*=//;p}" /default.prop')"
 			fi
-			cdn "$flashdev" && [[ "${devs[*]}" == *"$dev"* ]] || \
-				NONL=y askyn "No suitable device connected.  Retry?" || \
-				break
-			flashdev="$dev"
+			if [[ "$RNAME" == "dkp-aosp44" ]]
+			then
+				if [[ "$flashdev" == "d2"* ]]
+				then flashdev=d2
+				else
+					NONL=y askyn "No suitable device connected.  Retry?" || \
+					break
+				fi
+			else
+				cdn "$flashdev" && [[ "${devs[*]}" == *"$dev"* ]] || \
+					NONL=y askyn "No suitable device connected.  Retry?" || \
+					break
+				flashdev="$dev"
+			fi
 		done
 		echo
 		if [[ "$flashdev" ]]

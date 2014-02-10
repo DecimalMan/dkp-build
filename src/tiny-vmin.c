@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
+#include <sys/mount.h>
 
 #define FNTOK "dkp-vmin-"
 #define INITPATH "/system/etc/init.d/00dkp-vmin"
@@ -22,44 +23,64 @@
 // Lazy write to file
 #define iwrite(f, s) write(f, s, strlen(s))
 // Print to recovery console
-#define rprint(s) iwrite(cmdfd, "ui_print " s "\n")
+#define rprint(s) iwrite(cmdfd, "ui_print " s "\nui_print\n")
 
 int main(int argc, char **argv) {
-	int cmdfd, ffd;
+	int cmdfd, ffd, etcfd = 0;
 	int ret = 0;
+	char *msg = calloc(80, 1);
+	char *s = strstr(argv[3], FNTOK);
+	char *e = NULL;
+	int vmin_i;
+
 	if (argc != 4)
 		return 1;
 
 	cmdfd = atoi(argv[2]);
 
-	rprint("Mounting /system...");
-	if (system("mount /system") == -1) {
-		rprint("Mount failed!");
-		return 1;
+	if (s) {
+		s += strlen(FNTOK);
+		for (e = s; *e >= '0' && *e <= '9'; e++);
+		if (*e == '.')
+			*e = 0;
+		else
+			e = NULL;
+	}
+	if (!e) {
+		rprint("I don't understand my file name!");
+		return 2;
+	}
+	vmin_i = atoi(s);
+	if (vmin_i > 1500) {
+		rprint("Explosion mode engaged.");
+		rprint("Have a nice day.");
+		return 2;
+	}
+	if (vmin_i > 1150 || vmin_i < 600) {
+		strncat(msg, "ui_print ", 80);
+		strncat(msg, s, 80);
+		strncat(msg, " mV?  That seems excessive.\nui_print\n", 80);
+		iwrite(cmdfd, msg);
+		return 2;
 	}
 
-	rprint("Adjusting vmin...");
+
+	etcfd = opendir("/system/etc");
+	if (!etcfd) {
+		if (ret = mount("/dev/block/mmcblk0p14", "/system", "ext4",
+			MS_NOATIME | MS_NODEV | MS_NODIRATIME, "")) {
+			rprint("Can't mount /system!");
+			return -ret;
+		}
+	}
+
+	rprint("Adjusting minimum voltage...");
 	unlink(INITPATH);
 	ffd = open(INITPATH, O_WRONLY | O_CREAT | O_EXCL, 0755);
 	if (ffd) {
-		char *msg = calloc(80, 1);
-		char *vmin = "1150";
-		char *s = strstr(argv[3], FNTOK);
-		char *e = NULL;
-		if (s) {
-			s += strlen(FNTOK);
-			for (e = s; *e >= '0' && *e <= '9'; e++);
-			if (*e == '.')
-				*e = 0;
-			else
-				e = NULL;
-		}
-		if (!e)
-			s = vmin;
-
-		strncat(msg, "ui_print New vmin is ", 80);
+		strncat(msg, "ui_print New minimum voltage is ", 80);
 		strncat(msg, s, 80);
-		strncat(msg, " mV.\n", 80);
+		strncat(msg, " mV.\nui_print\n", 80);
 		iwrite(cmdfd, msg);
 
 		iwrite(ffd, "#!/system/bin/sh\necho ");
@@ -68,13 +89,16 @@ int main(int argc, char **argv) {
 		close(ffd);
 	} else {
 		rprint("Adjustment failed!");
-		ret = 1;
+		ret = 4;
 	}
 
-	rprint("Unmounting /system...");
-	if (system("umount /system") == -1) {
-		rprint("Unmount failed!");
-		ret = 1;
+bail:
+	if (!etcfd) {
+		closedir(etcfd);
+		if (umount("/system")) {
+			rprint("Couldn't unmount /system!");
+			return -ret;
+		}
 	}
 
 	return ret;
