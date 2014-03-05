@@ -18,32 +18,28 @@ ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 # Format used for filenames, relative to massbuild.sh
 ZIPFMT=('out/$rtype-$bdate/$RNAME-$dev-$bdate.zip' \
 	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip')
-# Devices available to build for
 if [[ "$RNAME" == "dkp-aosp44" ]]
 then
 	ALLDEVS=(d2)
 	DEFDEVS=(d2)
+	UPFMT='dkp/$RPATH/$RNAME-$bdate.zip'
 	export CROSS_COMPILE=../toolchain-trunk-20140210/bin/arm-eabi-
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
+	UPFMT='dkp/$RPATH/${dev//-/, }/$RNAME-$bdate.zip'
 	export CROSS_COMPILE=../toolchain-linaro-20140216/bin/arm-eabi-
 fi
-# Devices that will be be marked 'release' rather than 'testing'
-STABLE=(d2spr)
+
 # defconfig format, will be expanded per-device
 CFGFMT='cyanogen_$@_defconfig'
 
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
 
-# Dev-Host upload configs as ('release_val' 'experimental_val')
-# DHUSER and DHPASS should be set in devhostauth.sh
-DHPATH=('/dkp/$dev/$RPATH/Stable Builds/$RNAME-$(date +%F)-stable.zip' \
-	'/dkp/$dev/$RPATH/Testing Builds/$RNAME-$(date +%F)-testing$([[ "$ENAME" == dkp* ]] || echo "-($ENAME-branch)").zip')
-# Upload description ('release' 'experimental')
-DHDESC=('$RNAME $(date +%x) release for $dev' \
-	'$RNAME test build for $dev (from branch $ENAME)')
+# FTP server to upload to
+# ftp's stdin is hijacked, so it can't prompt for a password; use .netrc instead
+UPHOST=ftp.xstefen.net
 
 ###  END OF CONFIGURABLES  ###
 
@@ -57,7 +53,8 @@ askyn() { while :; do echo
 # Set output vars
 gbt() { dev="$1" eval izip="$ZIPFMT"; }
 # Complete device name; fail on multiple matches
-cdn() { local dn=($(grep -o "[-a-z0-9]*$1[-a-z0-9]*" <<<"${ALLDEVS[*]}")); [[ ${#dn[*]} == 1 ]] && dev="${dn[0]}"; }
+cdn() { local dn=($(grep -o "[-a-z0-9]*$1[-a-z0-9]*" <<<"${ALLDEVS[*]}"));
+	[[ ${#dn[*]} == 1 ]] && dev="${dn[0]}"; }
 # Fancy termination messages
 die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
 # ADB shell with return value
@@ -67,13 +64,11 @@ cd "$(dirname "$(readlink -f "$0")")"
 
 CF=false
 CL=false
-EXP=true
 BLD=true
 PKG=true
 FL=false
 UP=false
 KO=false
-BOGUS_ERRORS=false
 cfg=
 v="$1"
 while [[ "$v" ]]
@@ -84,14 +79,12 @@ do
 		# If next arg is a valid kconfig target, assume it requires
 		# serial make and stdin/stdout.
 		[[ "$2" != -* ]] && grep -q "^$2:" "$KSRC/scripts/kconfig/Makefile" 2>&- && \
-		{ cfg="$2"; s="$1"; shift 2; set -- "$s" "$@"; };;
+		{ cfg="$2"; s="$1"; shift 2; set -- "$s" "$@"; } && BLD=false && PKG=false;;
 	(C|--clean) CL=true;;
 	(f|--flash) FL=true;;
 	(m|--modules) KO=true; PKG=false;;
 	(n|--no-package) PKG=false;;
 	(N|--no-build) BLD=false;;
-	(--no-really) BOGUS_ERRORS=true;;
-	(r|--release) EXP=false;;
 	(u|--upload) UP=true;;
 	(-[^-]*);;
 	(*) 	if cdn "$v"
@@ -104,9 +97,9 @@ do
 			-c (--config) [<target>]: configure each device before building
 			-C (--clean): make clean for each device before building
 			-f (--flash): automagically flash
+			-m (--modules): just build modules
 			-n (--no-package): just build, don't package
 			-N (--no-build): don't rebuild the kernel
-			-r (--release): package builds as release
 			-u (--upload): upload builds to Dev-Host
 			EOF
 			exit 1
@@ -125,7 +118,7 @@ done
 [[ "${devs[*]}" ]] || devs=("${DEFDEVS[@]}")
 
 # Use a more informative naming scheme for experimental builds
-if $EXP
+if ! $UP
 then
 	bdate="$(date +%Y%m%d-%H%M%S)"
 	rtype="experimental"
@@ -135,12 +128,10 @@ else
 	rtype="release"
 fi
 
-if $BLD
-then
 # Use the make jobserver to sort out building everything
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
-KB="\$(MAKE) -S -C \"$KSRC\" O=\"$PWD/kbuild-$RNAME-\$@\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
+KB="\$(MAKE) -S -C \"$KSRC\" O=\"\$(tree)\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
 if [[ "$TW" == "yup" ]]
 then dc="$CFGFMT"
 else dc="VARIANT_DEFCONFIG=$CFGFMT SELINUX_DEFCONFIG=m2selinux_defconfig cyanogen_d2_defconfig"
@@ -166,35 +157,51 @@ else
 		mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
 	fi
 fi
+#if sed 's/$/$/' <(cat <<EOF
 if ! "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
+$(for dev in ${devs[@]}
+do gbt "$dev"
+echo $dev: tree = $PWD/kbuild-$RNAME-\$@
+echo $dev: izip = $PWD/$izip
+echo $dev: isrc = $PWD/installer-$RNAME
+done)
 ${devs[@]}:
-	@mkdir -p "kbuild-$RNAME-\$@"
+	@mkdir -p "\$(tree)"
 	@touch ".build-failed-\$@"
 	@rm -f "build-\$@.log"
 	$($CL && \
 	echo "@echo Cleaning \$@..." && \
-	echo "	@$KB clean &>>\"build-\$@.log\""
-	)$($CF && \
-	echo && \
+	echo "	@$KB clean &>>\"build-\$@.log\"")
+	$($CF && \
 	if [[ "$cfg" ]]
 	then
-		echo "	@echo Making $cfg for \$@..." && \
+		echo "@echo Making $cfg for \$@..."
 		echo "	@$KB -s $cfg 2>>\"build-\$@.log\""
+		echo "	@rm -f \".build-failed-\$@\""
 	else
-		echo "	@echo Making $CFGFMT..." && \
+		echo "@echo Making $CFGFMT..." && \
 		echo "	@$KB $dc &>>\"build-\$@.log\""
-	fi)$(! [[ "$cfg" ]] && \
-	echo && \
-	echo "	@echo Making $($KO && echo modules || echo all) for \$@..." && \
-	echo "	@rm -f \"kbuild-$RNAME-\$@/.version\"" && \
-	(if $BOGUS_ERRORS
-	then echo "	@until $KB $($KO && echo modules) &>>\"build-\$@.log\"; do :; done"
-	else echo "	@$KB $($KO && echo modules) &>>\"build-\$@.log\""
-	fi) && \
-	echo "	@echo Stripping \$@ modules..." && \
-	echo "	@find \"kbuild-$RNAME-\$@\" -name '*.ko' -exec \"${CROSS_COMPILE#../}\"strip --strip-unneeded \{\} \; &>>\"build-\$@.log\"" && \
-	echo "	@echo \"Finished building \$@.\""
-	)
+	fi)
+	$($BLD && \
+	echo "@echo \"Making $($KO && echo modules || echo all) for \$@...\"" && \
+	echo "	@rm -f \"\$(tree)/.version\"" && \
+	echo "	@$KB $($KO && echo modules) &>>\"build-\$@.log\"")
+	@echo "Stripping \$@ modules..."
+	@find "\$(tree)" -name '*.ko' -exec "${CROSS_COMPILE#../}strip" --strip-unneeded \{\} \; &>>"build-\$@.log"
+	$($UP && \
+	echo "@echo Saving \$@ System.map..." && \
+	echo "	@mkdir -p \"\$(dir \$(izip))\"" && \
+	echo "	@xz -c \"\$(tree)/System.map\" >\"\$(izip:.zip=.map)\"")
+	$($PKG && ! $KO && \
+	echo "@echo \"Packaging \$@...\"" && \
+	echo "	@rm -Rf \"\$(tree)/.package\"" && \
+	echo "	@cp -lr \"\$(isrc)\" \"\$(tree)/.package\"" && \
+	echo "	@mkdir -p \"\$(tree)/.package/system/lib/modules\"" && \
+	echo "	@cp -l \"\$(tree)/arch/arm/boot/zImage\" \"\$(tree)/.package/dkp-zImage\"" && \
+	echo "	@find \"\$(tree)\" -name '*.ko' -exec cp -l \{\} \"\$(tree)/.package/system/lib/modules\" \;" && \
+	echo "	@cd \"\$(tree)/.package\" && zip -r \"\$(izip)\" * &>>\"build-\$@.log\"" && \
+	echo "	@echo \"Created \$(notdir \$(izip)).\"")
+	@echo "Finished building \$@."
 	@rm -f ".build-failed-\$@"
 .PHONY: ${devs[@]}
 EOF
@@ -209,66 +216,10 @@ fi
 
 [[ "$cfg" ]] && echo && die 0 "restart without --config to build."
 
-$EXP && askyn "Review build logs?" && \
+askyn "Review build logs?" && \
 		less $(sed 's/\(^\| \)\([^ ]*\)/build-\2.log /g' <<<"${devs[*]}")
 
-echo
-$PKG || die 0 "packaging disabled by --$($KO && echo modules || echo no-package)."
-fi
-
-# Package everything.  Ramdisk is borrowed from the existing kernel so I don't
-# have to keep CM sources around.  boot.img is generated first to avoid
-# overwriting existing modules on failure.
-if false
-then
-echo "Generating install script..."
-cat >installer/META-INF/com/google/android/updater-script <<-EOF
-	ui_print("flashing kernel");
-	run_program("/sbin/mkdir", "-p", "/cache/rd");
-	package_extract_dir("rd", "/cache/rd");
-	set_perm(0, 0, 0755, "/cache/rd/repack");
-	run_program("/cache/rd/repack",
-		"/dev/block/mmcblk0p7",
-		"/cache/rd/zImage");
-	delete_recursive("/cache/rd");
-	ui_print("mounting system");
-	run_program("/sbin/busybox", "mount", "/system");
-	ui_print("copying modules & initscripts");
-	package_extract_dir("system", "/system");
-	$(ls installer/system/xbin/* &>/dev/null && \
-	echo "ui_print(\"setting permissions\");" && \
-	for f in installer/system/etc/init.d/*
-	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
-	done
-	)$(ls installer/system/xbin/* &>/dev/null && \
-	for f in installer/system/xbin/*
-	do echo "set_perm(0, 0, 0755, \"${f#installer}\");"
-	done
-	)ui_print("unmounting system");
-	unmount("/system");
-EOF
-fi
-for dev in "${devs[@]}"
-do
-	echo "Packaging $dev..."
-	cp "kbuild-$RNAME-$dev/arch/arm/boot/zImage" "installer/dkp-zImage"
-	rm -f installer/system/lib/modules/*
-	find "kbuild-$RNAME-$dev" -name '*.ko' -exec cp '{}' installer/system/lib/modules ';'
-	gbt "$dev"
-	rm -f "$izip"
-	mkdir -p "$(dirname "$izip")"
-	(cd installer && zip -qr "../$izip" *)
-	echo "Created $izip"
-	if $UP
-	then
-		xz -c "kbuild-$RNAME-$dev/System.map" >"${izip%zip}map"
-		echo "Saved $dev System.map"
-	fi
-	sbi="$(stat -c %s installer/dkp-zImage)"
-	let sd="$(du -b -d0 installer | cut -f 1)-$sbi"
-	sz="$(stat -c %s "$izip")"
-	echo "zImage: $sbi; data: $sd; zip: $sz"
-done
+! $PKG && echo && die 0 "packaging disabled by --$($KO && echo modules || echo no-package)."
 
 if $FL
 then
@@ -317,7 +268,6 @@ then
 			fi
 
 			gbt "$flashdev"
-			# adb always returns 0, which sucks.
 			adbsh "mkdir -p '$flashdir/massbuild/'"
 			echo "Pushing $izip..."
 			adb -d push "$izip" "$flashdir/massbuild/$(basename "$izip")"
@@ -328,6 +278,27 @@ then
 			echo "Rebooting to recovery..."
 			adb -d reboot recovery
 		fi
+	else	echo
+	fi
+fi
+
+if $UP
+then
+	if askyn "Upload to $UPHOST?"
+	then
+		for dev in "${devs[@]}"
+		do
+			gbt "$dev"
+			eval path=\"$UPFMT\"
+			echo cd /
+			while [[ "$path" == */* ]]
+			do
+				echo mkdir \"${path%%/*}\"
+				echo cd \"${path%%/*}\"
+				path="${path#*/}"
+			done
+			echo put \"$izip\" \"${path}\"
+		done | ftp -p "$UPHOST"
 	else	echo
 	fi
 fi
