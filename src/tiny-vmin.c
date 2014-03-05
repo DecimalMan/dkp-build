@@ -15,6 +15,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <sys/mount.h>
 
 #define FNTOK "dkp-vmin-"
@@ -26,12 +27,13 @@
 #define rprint(s) iwrite(cmdfd, "ui_print " s "\nui_print\n")
 
 int main(int argc, char **argv) {
-	int cmdfd, ffd, etcfd = 0;
+	int cmdfd, ffd;
 	int ret = 0;
 	char *msg = calloc(80, 1);
 	char *s = strstr(argv[3], FNTOK);
 	char *e = NULL;
 	int vmin_i;
+	int do_umount = 1;
 
 	if (argc != 4)
 		return 1;
@@ -47,7 +49,7 @@ int main(int argc, char **argv) {
 			e = NULL;
 	}
 	if (!e) {
-		rprint("I don't understand my file name!");
+		rprint("Rename me to something like \"dkp-vmin-700.zip\"!");
 		return 2;
 	}
 	vmin_i = atoi(s);
@@ -61,17 +63,17 @@ int main(int argc, char **argv) {
 		strncat(msg, s, 80);
 		strncat(msg, " mV?  That seems excessive.\nui_print\n", 80);
 		iwrite(cmdfd, msg);
+		rprint("600 to 1150 mV would be reasonable");
 		return 2;
 	}
 
 
-	etcfd = opendir("/system/etc");
-	if (!etcfd) {
-		if (ret = mount("/dev/block/mmcblk0p14", "/system", "ext4",
-			MS_NOATIME | MS_NODEV | MS_NODIRATIME, "")) {
-			rprint("Can't mount /system!");
-			return -ret;
-		}
+	if (ret = mount("/dev/block/mmcblk0p14", "/system", "ext4",
+		MS_NOATIME | MS_NODEV | MS_NODIRATIME, "")) {
+		rprint("Can't mount /system!");
+		if (errno != EBUSY)
+			return errno;
+		do_umount = 0;
 	}
 
 	rprint("Adjusting minimum voltage...");
@@ -93,8 +95,7 @@ int main(int argc, char **argv) {
 	}
 
 bail:
-	if (!etcfd) {
-		closedir(etcfd);
+	if (do_umount) {
 		if (umount("/system")) {
 			rprint("Couldn't unmount /system!");
 			return -ret;
