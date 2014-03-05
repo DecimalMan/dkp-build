@@ -23,9 +23,11 @@ if [[ "$RNAME" == "dkp-aosp44" ]]
 then
 	ALLDEVS=(d2)
 	DEFDEVS=(d2)
+	export CROSS_COMPILE=../toolchain-trunk-20140210/bin/arm-eabi-
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
+	export CROSS_COMPILE=../toolchain-linaro-20140216/bin/arm-eabi-
 fi
 # Devices that will be be marked 'release' rather than 'testing'
 STABLE=(d2spr)
@@ -47,9 +49,6 @@ DHDESC=('$RNAME $(date +%x) release for $dev' \
 
 devs=()
 flashdev=
-export CROSS_COMPILE=../hybrid-toolchain/bin/arm-eabi-
-#export CROSS_COMPILE=../hybrid-toolchain-20130706/bin/arm-linux-gnueabi-
-#export CROSS_COMPILE=../hybrid-4_7-toolchain/bin/arm-linux-gnueabi-
 
 # Quick prompt
 askyn() { while :; do echo
@@ -72,7 +71,7 @@ EXP=true
 BLD=true
 PKG=true
 FL=false
-DH=false
+UP=false
 KO=false
 BOGUS_ERRORS=false
 cfg=
@@ -93,7 +92,7 @@ do
 	(N|--no-build) BLD=false;;
 	(--no-really) BOGUS_ERRORS=true;;
 	(r|--release) EXP=false;;
-	(u|--upload) DH=true;;
+	(u|--upload) UP=true;;
 	(-[^-]*);;
 	(*) 	if cdn "$v"
 		then devs=("${devs[@]}" "$dev")
@@ -260,9 +259,9 @@ do
 	mkdir -p "$(dirname "$izip")"
 	(cd installer && zip -qr "../$izip" *)
 	echo "Created $izip"
-	if $DH
+	if $UP
 	then
-		cp "kbuild-$RNAME-$dev/System.map" "${izip%zip}map"
+		xz -c "kbuild-$RNAME-$dev/System.map" >"${izip%zip}map"
 		echo "Saved $dev System.map"
 	fi
 	sbi="$(stat -c %s installer/dkp-zImage)"
@@ -331,71 +330,4 @@ then
 		fi
 	else	echo
 	fi
-fi
-
-if $DH && askyn "Upload to Dev-Host?"
-then
-	[[ -r devhostauth.sh ]] && . ./devhostauth.sh || true
-	if ! [[ "$DHUSER" && "$DHPASS" ]]
-	then
-		read -p 'Dev-Host username: ' DHUSER
-		read -s -p 'Dev-Host password: ' DHPASS
-		echo
-	fi
-	if $EXP
-	then dhidx=1
-	else dhidx=0
-	fi
-	echo "Logging in as $DHUSER..."
-	cookies="$(curl -s -F "action=login" -F "username=$DHUSER" -F "password=$DHPASS" -F "remember=false" -c - -o dh.html d-h.st)" || \
-		die 1 "couldn't log in."
-	for dev in "${devs[@]}"
-	do
-		gbt "$dev"
-		html="$(curl -s -b <(echo "$cookies") d-h.st)" || \
-			die 1 "couldn't fetch upload page."
-		id=0
-		IFS=/ read -a c < <(eval echo "${DHPATH[$dhidx]}")
-		set -- "${c[@]}"
-		[[ "$1" ]] || shift
-		[[ "$2" ]] && {
-		p="\\/$1"
-		# This really needs to be optimized, but I'm lazy
-		while new="$(sed -n '/<select name="uploadfolder"/ {
-			: nl; n;
-			s/.*<option value="\([0-9]\+\)">'"$p"'<\/option>.*/\1/; t pq;
-			s/<\/select>//; T nl; q 1;
-			: pq; p; q; }' <<<"$html")" \
-			&& [[ "$2" ]]
-		do shift; p="$p\\/$1"; id="$new"; done
-		while [[ "$2" ]]
-		do	id="$(curl -s -b <(echo "$cookies") \
-				-F "action=createfolder" \
-				-F "fld_parent_id=$id" \
-				-F "fld_name=$1" \
-				d-h.st)"
-			shift
-		done
-		}
-		action="$(sed -n '/<div class="file-upload"/ {
-			: nl; n;
-			s/.*<form.*action="\([^"]*\)".*/\1/; t pq;
-			s/<\/form>//; T nl; q 1;
-			: pq; p; q; }' <<<"$html")" || \
-			die 1 "couldn't determine upload URL."
-		userid="$(sed -n '/d-h.st.*user/ { s/.*%7E//; p }' <<<"$cookies")" || \
-			die 1 "couldn't determine user id."
-		echo "Beginning upload of ${izip}..."
-		curl -s -b <(echo "$cookies") \
-			-F "UPLOAD_IDENTIFIER=${action##*=}" \
-			-F "action=upload" \
-			-F "uploadfolder=$id" \
-			-F "public=1" \
-			-F "user_id=$userid" \
-			-F "files[]=@$izip;filename=$1" \
-			-F "file_description[]=$(eval echo "\"${DHDESC[$dhidx]}\"")" \
-			"$action" -o /dev/null &
-	done
-	wait
-	echo "All uploads completed!"
 fi
