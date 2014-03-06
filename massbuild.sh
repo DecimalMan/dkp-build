@@ -32,7 +32,7 @@ else
 fi
 
 # defconfig format, will be expanded per-device
-CFGFMT='cyanogen_$@_defconfig'
+CFGFMT='cyanogen_$(dev)_defconfig'
 
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
@@ -132,7 +132,7 @@ fi
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
 KB="\$(MAKE) -S -C \"$KSRC\" O=\"\$(tree)\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
-if [[ "$TW" == "yup" ]]
+if [[ "$RNAME" != "dkp-aosp43" ]]
 then dc="$CFGFMT"
 else dc="VARIANT_DEFCONFIG=$CFGFMT SELINUX_DEFCONFIG=m2selinux_defconfig cyanogen_d2_defconfig"
 fi
@@ -148,62 +148,83 @@ else
 	else pc="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
 	fi
 	if [[ "$LTOPART" ]]
-	then mj="-j$pc CONFIG_LTO_PARTITIONS=$LTOPART"
-	else
-		mt="$(sed -n '/MemTotal/{s/[^0-9]//g;p}' /proc/meminfo)"
+	then	lp="$LTOPART"
+	else	mt="$(sed -n '/MemTotal/{s/[^0-9]//g;p}' /proc/meminfo)"
 		#((lp=27962026*pc/mt, lp=lp>32?32:lp<pc?pc:lp))
 		((lp=31457280*pc/mt, lp=lp>32?32:lp<pc?pc:lp))
 		echo "Building with $lp LTO partitions..."
 		mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
 	fi
+	mj="-j$pc CONFIG_LTO_PARTITIONS=$LTOPART"
 fi
-#if sed 's/$/$/' <(cat <<EOF
 if ! "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
 $(for dev in ${devs[@]}
 do gbt "$dev"
-echo $dev: tree = $PWD/kbuild-$RNAME-\$@
+echo $dev: tree = $PWD/kbuild-$RNAME-${dev}
 echo $dev: izip = $PWD/$izip
 echo $dev: isrc = $PWD/installer-$RNAME
+echo $dev: dev = ${dev}
+echo $dev: log = build-${dev}.log
+echo $dev: \
+	$($BLD && echo build-${dev}) \
+	$($UP && echo savemap-${dev}) \
+	$($PKG && echo package-${dev})
 done)
+
 ${devs[@]}:
+	@echo "Finished building \$(dev)"
+	@rm -f ".build-failed-\$(dev)"
+
+init-%:
+	@touch ".build-failed-\$(dev)"
 	@mkdir -p "\$(tree)"
-	@touch ".build-failed-\$@"
-	@rm -f "build-\$@.log"
-	$($CL && \
-	echo "@echo Cleaning \$@..." && \
-	echo "	@$KB clean &>>\"build-\$@.log\"")
-	$($CF && \
-	if [[ "$cfg" ]]
-	then
-		echo "@echo Making $cfg for \$@..."
-		echo "	@$KB -s $cfg 2>>\"build-\$@.log\""
-		echo "	@rm -f \".build-failed-\$@\""
-	else
-		echo "@echo Making $CFGFMT..." && \
-		echo "	@$KB $dc &>>\"build-\$@.log\""
-	fi)
-	$($BLD && \
-	echo "@echo \"Making $($KO && echo modules || echo all) for \$@...\"" && \
-	echo "	@rm -f \"\$(tree)/.version\"" && \
-	echo "	@$KB $($KO && echo modules) &>>\"build-\$@.log\"")
-	@echo "Stripping \$@ modules..."
-	@find "\$(tree)" -name '*.ko' -exec "${CROSS_COMPILE#../}strip" --strip-unneeded \{\} \; &>>"build-\$@.log"
-	$($UP && \
-	echo "@echo Saving \$@ System.map..." && \
-	echo "	@mkdir -p \"\$(dir \$(izip))\"" && \
-	echo "	@xz -c \"\$(tree)/System.map\" >\"\$(izip:.zip=.map)\"")
-	$($PKG && ! $KO && \
-	echo "@echo \"Packaging \$@...\"" && \
-	echo "	@rm -Rf \"\$(tree)/.package\"" && \
-	echo "	@cp -lr \"\$(isrc)\" \"\$(tree)/.package\"" && \
-	echo "	@mkdir -p \"\$(tree)/.package/system/lib/modules\"" && \
-	echo "	@cp -l \"\$(tree)/arch/arm/boot/zImage\" \"\$(tree)/.package/dkp-zImage\"" && \
-	echo "	@find \"\$(tree)\" -name '*.ko' -exec cp -l \{\} \"\$(tree)/.package/system/lib/modules\" \;" && \
-	echo "	@cd \"\$(tree)/.package\" && zip -r \"\$(izip)\" * &>>\"build-\$@.log\"" && \
-	echo "	@echo \"Created \$(notdir \$(izip)).\"")
-	@echo "Finished building \$@."
-	@rm -f ".build-failed-\$@"
-.PHONY: ${devs[@]}
+	@rm -f "\$(log)"
+
+build-%: init-% $($CL && echo clean-%) $($CF && echo config-%)
+	@echo "Making $($KO && echo modules || echo all) for \$(dev)..."
+	@rm -f "\$(tree)/.version"
+	@$KB $($KO && echo modules) &>>\$(log)
+
+config-%: init-% $($CL && echo clean-%)
+$(if [[ "$cfg" ]]
+then
+echo "	@echo Making $cfg for \$(dev)..."
+echo "	@$KB -s $cfg 2>>\"\$(log)\""
+echo "	@rm -f \".build-failed-\$(dev)\""
+else
+echo "	@echo Making $CFGFMT..."
+echo "	@$KB $dc &>>\"\$(log)\""
+fi)
+
+clean-%: init-%
+	@echo "Cleaning \$(dev)..."
+	@$KB clean &>>"\$(log)"
+
+savemap-%: $($BLD && echo build-%)
+	@echo "Saving System.map for \$(dev)..."
+	@mkdir -p "\$(dir \$(izip))"
+	@xz -c "\$(tree)/System.map" >"\$(izip:.zip=.map)"
+
+strip-%: $($BLD && echo build-%)
+	@echo "Stripping modules for \$(dev)..."
+	@find "\$(tree)" -name '*.ko' -exec \
+		"${CROSS_COMPILE#../}strip" --strip-unneeded \{\} \; &>>"\$(log)"
+
+package-%: strip-% $($BLD && echo build-%)
+	@echo "Packaging \$(dev)..."
+	@rm -rf "\$(tree)/.package"
+	@cp -r "\$(isrc)" "\$(tree)/.package"
+	@mkdir -p "\$(tree)/.package/system/lib/modules"
+	@cp "\$(tree)/arch/arm/boot/zImage" "\$(tree)/.package/dkp-zImage"
+	@find "\$(tree)"/* -name '*.ko' -exec cp \{\} "\$(tree)/.package/system/lib/modules" \;
+	@mkdir -p "\$(dir \$(izip))"
+	@cd "\$(tree)/.package" && zip -r "\$(izip)" * &>>"\$(log)"
+	@let sbi=\$\$(stat -c %s "\$(tree)/.package/dkp-zImage"); \
+	 let sd=\$\$(du -b -d0 "\$(tree)/.package" | cut -f 1)-\$sbi; \
+	 let sz=\$\$(stat -c %s "\$(izip)"); \
+	 echo "\$(notdir \$(izip)): zImage: \$\$sbi; data: \$\$sd; zip: \$\$sz"
+
+.PHONY: init-% build-% savemap-% package-% clean-% config-% ${devs[@]}
 EOF
 )
 then
