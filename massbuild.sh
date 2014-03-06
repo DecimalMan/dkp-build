@@ -38,7 +38,6 @@ CFGFMT='cyanogen_$(dev)_defconfig'
 FLASH=external
 
 # FTP server to upload to
-# ftp's stdin is hijacked, so it can't prompt for a password; use .netrc instead
 UPHOST=ftp.xstefen.net
 
 ###  END OF CONFIGURABLES  ###
@@ -307,19 +306,13 @@ if $UP
 then
 	if askyn "Upload to $UPHOST?"
 	then
+		copt=
 		for dev in "${devs[@]}"
 		do
 			gbt "$dev"
 			eval path=\"$UPFMT\"
-			echo cd /
-			while [[ "$path" == */* ]]
-			do
-				echo mkdir \"${path%%/*}\"
-				echo cd \"${path%%/*}\"
-				path="${path#*/}"
-			done
-			echo put \"$izip\" \"${path}\"
-		done | ftp -p "$UPHOST"
-	else	echo
+			copt="$copt -T \"$izip\" \"ftp://$UPHOST/$path\""
+		done
+		eval curl -n --ftp-create-dirs $copt
 	fi
 fi
