@@ -23,12 +23,12 @@ then
 	ALLDEVS=(d2)
 	DEFDEVS=(d2)
 	UPFMT='dkp/$RPATH/$RNAME-$bdate.zip'
-	export CROSS_COMPILE=../toolchain-trunk-20140210/bin/arm-eabi-
+	export CROSS_COMPILE=../toolchain/trunk-20140426/bin/arm-eabi-
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	UPFMT='dkp/$RPATH/${dev//-/, }/$RNAME-$bdate.zip'
-	export CROSS_COMPILE=../toolchain-linaro-20140216/bin/arm-eabi-
+	export CROSS_COMPILE=../toolchain/linaro-20140426/bin/arm-eabi-
 fi
 
 # defconfig format, will be expanded per-device
@@ -66,6 +66,7 @@ CL=false
 BLD=true
 PKG=true
 FL=false
+FLASH_NOREBOOT=false
 UP=false
 KO=false
 cfg=
@@ -81,6 +82,7 @@ do
 		{ cfg="$2"; s="$1"; shift 2; set -- "$s" "$@"; } && BLD=false && PKG=false;;
 	(C|--clean) CL=true;;
 	(f|--flash) FL=true;;
+	(F) FL=true; FLASH_NOREBOOT=true;;
 	(m|--modules) KO=true; PKG=false;;
 	(n|--no-package) PKG=false;;
 	(N|--no-build) BLD=false;;
@@ -105,7 +107,7 @@ do
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if [[ "$1" == --* ]] || ! getopts "cCflmnNru" v "$1"
+	if [[ "$1" == --* ]] || ! getopts "cCfFlmnNru" v "$1"
 	then
 		shift
 		v="$1"
@@ -164,7 +166,9 @@ echo $dev: izip = $PWD/$izip
 echo $dev: isrc = $PWD/installer-$RNAME
 echo $dev: dev = ${dev}
 echo $dev: log = build-${dev}.log
+echo $dev: fail = .failed-$RNAME-${dev}
 echo $dev: \
+	$($CF && echo config-${dev}) \
 	$($BLD && echo build-${dev}) \
 	$($UP && echo savemap-${dev}) \
 	$($PKG && echo package-${dev})
@@ -172,10 +176,10 @@ done)
 
 ${devs[@]}:
 	@echo "Finished building \$(dev)"
-	@rm -f ".build-failed-\$(dev)"
+	@rm -f "\$(fail)"
 
 init-%:
-	@touch ".build-failed-\$(dev)"
+	@touch "\$(fail)"
 	@mkdir -p "\$(tree)"
 	@rm -f "\$(log)"
 
@@ -189,7 +193,7 @@ $(if [[ "$cfg" ]]
 then
 echo "	@echo Making $cfg for \$(dev)..."
 echo "	@$KB -s $cfg 2>>\"\$(log)\""
-echo "	@rm -f \".build-failed-\$(dev)\""
+echo "	@rm -f \"\$(fail)\""
 else
 echo "	@echo Making $CFGFMT..."
 echo "	@$KB $dc &>>\"\$(log)\""
@@ -219,7 +223,7 @@ package-%: strip-% $($BLD && echo build-%)
 	@mkdir -p "\$(dir \$(izip))"
 	@cd "\$(tree)/.package" && zip -r "\$(izip)" * &>>"\$(log)"
 	@let sbi=\$\$(stat -c %s "\$(tree)/.package/dkp-zImage"); \
-	 let sd=\$\$(du -b -d0 "\$(tree)/.package" | cut -f 1)-\$sbi; \
+	 let sd=\$\$(du -b -d0 "\$(tree)/.package" | cut -f 1)-\$\$sbi; \
 	 let sz=\$\$(stat -c %s "\$(izip)"); \
 	 echo "\$(notdir \$(izip)): zImage: \$\$sbi; data: \$\$sd; zip: \$\$sz"
 
@@ -228,9 +232,9 @@ EOF
 )
 then
 	askyn "Review build logs for failed builds?" && \
-		less $(ls .build-failed-* | \
-		sed 's/\.build-failed-\([^ ]*\)/build-\1.log/')
-	rm -f .build-failed-*
+		less $(ls ".failed-$RNAME-"* | \
+		sed 's/\.failed-'"$RNAME"'-\([^ ]*\)/build-\1.log/')
+	rm -f ".failed-$RNAME-"*
 	die 1 "building failed."
 fi
 
@@ -292,11 +296,14 @@ then
 			echo "Pushing $izip..."
 			adb -d push "$izip" "$flashdir/massbuild/$(basename "$izip")"
 			adbsh "[ -f '$flashdir/massbuild/$(basename "$izip")' ]" >/dev/null
-			echo "Generating OpenRecoveryScript..."
-			inst="(echo mount $recdir; echo install $recdir/massbuild/$(basename "$izip"); echo unmount $recdir) >/cache/recovery/openrecoveryscript"
-			(adbsh "su -c '$inst'" || adbsh "$inst") >/dev/null
-			echo "Rebooting to recovery..."
-			adb -d reboot recovery
+			if ! $FLASH_NOREBOOT
+			then
+				echo "Generating OpenRecoveryScript..."
+				inst="(echo mount $recdir; echo install $recdir/massbuild/$(basename "$izip"); echo unmount $recdir) >/cache/recovery/openrecoveryscript"
+				(adbsh "su -c '$inst'" || adbsh "$inst") >/dev/null
+				echo "Rebooting to recovery..."
+				adb -d reboot recovery
+			fi
 		fi
 	else	echo
 	fi
