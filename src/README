@@ -10,3 +10,7 @@ tiny-vmin.c is a drop-in replacement for update-binary to adjust (or more
 accurately, to replace) the minimum voltage initscript used by dkp.  It uses a
 few tricks that aren't possible with Google's update-binary, and compiles into
 a miniscule binary.
+
+extractrd.c and injectrd.c are handy tools for manipulating the ramdisk in a
+boot.img.  They're very small, very fast, and very simple.  "extractrd boot.img
+>ramdisk.gz" dumps the ramdisk, "injectrd boot.img <ramdisk.gz" overwrites it.
