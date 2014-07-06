@@ -18,12 +18,12 @@ ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 # Format used for filenames, relative to massbuild.sh
 ZIPFMT=('out/$rtype-$bdate/$RNAME-$dev-$bdate.zip' \
 	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip')
-if [[ "$RNAME" == "dkp-aosp44" ]]
+if [[ "$RNAME" == *"44" ]]
 then
 	ALLDEVS=(d2)
 	DEFDEVS=(d2)
 	UPFMT='dkp/$RPATH/$RNAME-$bdate.zip'
-	export CROSS_COMPILE=../toolchain/trunk-20140426/bin/arm-eabi-
+	export CROSS_COMPILE=../toolchain/trunk-20140515/bin/arm-eabi-
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
@@ -93,21 +93,22 @@ do
 		else
 			cat >&2 <<-EOF
 			Usage: $0 [options] [devices]
-			Devices: ${ALLDEVS[*]} (edit $0 to update list)
+			Devices: (edit $0 to update list)
+			 ${ALLDEVS[*]}
 			Options:
-			-c (--config) [<target>]: configure each device before building
-			-C (--clean): make clean for each device before building
-			-f (--flash): automagically flash
-			-m (--modules): just build modules
-			-n (--no-package): just build, don't package
-			-N (--no-build): don't rebuild the kernel
-			-u (--upload): upload builds to Dev-Host
+			 -c (--config) [<target>]: configure each device before building
+			 -C (--clean): make clean for each device before building
+			 -f (--flash): automagically flash
+			 -m (--modules): just build modules
+			 -n (--no-package): just build, don't package
+			 -N (--no-build): don't rebuild the kernel
+			 -u (--upload): upload builds to FTP
 			EOF
 			exit 1
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if [[ "$1" == --* ]] || ! getopts "cCfFlmnNru" v "$1"
+	if [[ "$1" == --* ]] || ! getopts "cCfFmnNu" v "$1"
 	then
 		shift
 		v="$1"
@@ -171,7 +172,8 @@ echo $dev: \
 	$($CF && echo config-${dev}) \
 	$($BLD && echo build-${dev}) \
 	$($UP && echo savemap-${dev}) \
-	$($PKG && echo package-${dev})
+	$($PKG && echo package-${dev}) \
+	$($KO && echo strip-${dev})
 done)
 
 ${devs[@]}:
@@ -186,7 +188,11 @@ init-%:
 build-%: init-% $($CL && echo clean-%) $($CF && echo config-%)
 	@echo "Making $($KO && echo modules || echo all) for \$(dev)..."
 	@rm -f "\$(tree)/.version"
-	@$KB $($KO && echo modules) &>>\$(log)
+	@$KB $($KO && echo modules) &>>\$(log); rv=\$\$?; \
+	 echo "\$(dev):" \
+	 "\`grep 'warning:' \$(log) | wc -l\` warnings," \
+	 "\`grep 'error:' \$(log) | wc -l\` errors"; \
+	 exit \$\$rv
 
 config-%: init-% $($CL && echo clean-%)
 $(if [[ "$cfg" ]]
@@ -210,7 +216,7 @@ savemap-%: $($BLD && echo build-%)
 
 strip-%: $($BLD && echo build-%)
 	@echo "Stripping modules for \$(dev)..."
-	@find "\$(tree)" -name '*.ko' -exec \
+	@find "\$(tree)"/*/ -name '*.ko' -a -printf 'Stripping %p...\n' -exec \
 		"${CROSS_COMPILE#../}strip" --strip-unneeded \{\} \; &>>"\$(log)"
 
 package-%: strip-% $($BLD && echo build-%)
