@@ -23,7 +23,7 @@ then
 	ALLDEVS=(d2)
 	DEFDEVS=(d2)
 	UPFMT='dkp/$RPATH/$RNAME-$bdate.zip'
-	export CROSS_COMPILE=../toolchain/trunk-20140515/bin/arm-eabi-
+	export CROSS_COMPILE=../toolchain/arm-none-eabi-gcc-4_9/bin/arm-eabi-
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
@@ -69,6 +69,7 @@ FL=false
 FLASH_NOREBOOT=false
 UP=false
 KO=false
+SP=false
 cfg=
 v="$1"
 while [[ "$v" ]]
@@ -86,6 +87,7 @@ do
 	(m|--modules) KO=true; PKG=false;;
 	(n|--no-package) PKG=false;;
 	(N|--no-build) BLD=false;;
+	(s|--sparse) SP=true;;
 	(u|--upload) UP=true;;
 	(-[^-]*);;
 	(*) 	if cdn "$v"
@@ -102,13 +104,14 @@ do
 			 -m (--modules): just build modules
 			 -n (--no-package): just build, don't package
 			 -N (--no-build): don't rebuild the kernel
+			 -s (--sparse): build with C=1 to run sparse
 			 -u (--upload): upload builds to FTP
 			EOF
 			exit 1
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if [[ "$1" == --* ]] || ! getopts "cCfFmnNu" v "$1"
+	if [[ "$1" == --* ]] || ! getopts "cCfFmnNsu" v "$1"
 	then
 		shift
 		v="$1"
@@ -172,8 +175,7 @@ echo $dev: \
 	$($CF && echo config-${dev}) \
 	$($BLD && echo build-${dev}) \
 	$($UP && echo savemap-${dev}) \
-	$($PKG && echo package-${dev}) \
-	$($KO && echo strip-${dev})
+	$($PKG && echo package-${dev})
 done)
 
 ${devs[@]}:
@@ -188,7 +190,8 @@ init-%:
 build-%: init-% $($CL && echo clean-%) $($CF && echo config-%)
 	@echo "Making $($KO && echo modules || echo all) for \$(dev)..."
 	@rm -f "\$(tree)/.version"
-	@$KB $($KO && echo modules) &>>\$(log); rv=\$\$?; \
+	@$KB $($KO && echo modules) $($SP && echo C=1 CF=-D__CHECK_ENDIAN__) \
+		&>>\$(log); rv=\$\$?; \
 	 echo "\$(dev):" \
 	 "\`grep 'warning:' \$(log) | wc -l\` warnings," \
 	 "\`grep 'error:' \$(log) | wc -l\` errors"; \
