@@ -23,7 +23,7 @@ then
 	ALLDEVS=(d2)
 	DEFDEVS=(d2)
 	UPFMT='dkp/$RPATH/$RNAME-$bdate.zip'
-	export CROSS_COMPILE=../toolchain/arm-none-eabi-gcc-4_9/bin/arm-eabi-
+	export CROSS_COMPILE=../toolchain/gcc-4_9-20141028/bin/arm-eabi-
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
@@ -155,12 +155,10 @@ else
 	if [[ "$LTOPART" ]]
 	then	lp="$LTOPART"
 	else	mt="$(sed -n '/MemTotal/{s/[^0-9]//g;p}' /proc/meminfo)"
-		#((lp=27962026*pc/mt, lp=lp>32?32:lp<pc?pc:lp))
-		((lp=31457280*pc/mt, lp=lp>32?32:lp<pc?pc:lp))
+		((lp=31457280*pc/mt, lp=lp>32?32:lp<pc?pc:lp, lp-=lp%pc))
 		echo "Building with $lp LTO partitions..."
-		mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
 	fi
-	mj="-j$pc CONFIG_LTO_PARTITIONS=$LTOPART"
+	mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
 fi
 if ! "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
 $(for dev in ${devs[@]}
