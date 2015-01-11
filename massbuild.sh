@@ -18,12 +18,13 @@ ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 # Format used for filenames, relative to massbuild.sh
 ZIPFMT=('out/$rtype-$bdate/$RNAME-$dev-$bdate.zip' \
 	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip')
-if [[ "$RNAME" == *"44" ]]
+if [[ "$RNAME" == *aosp* ]]
 then
 	ALLDEVS=(d2)
 	DEFDEVS=(d2)
 	UPFMT='dkp/$RPATH/$RNAME-$bdate.zip'
-	export CROSS_COMPILE=../toolchain/gcc-4_9-20141028/bin/arm-eabi-
+	#export CROSS_COMPILE=../toolchain/gcc-4_9-20141028/bin/arm-eabi-
+	export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20141206/bin/arm-eabi-
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
@@ -160,7 +161,7 @@ else
 	fi
 	mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
 fi
-if ! "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
+if ! nice "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
 $(for dev in ${devs[@]}
 do gbt "$dev"
 echo $dev: tree = $PWD/kbuild-$RNAME-${dev}
