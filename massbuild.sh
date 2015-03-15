@@ -20,15 +20,15 @@ ZIPFMT=('out/$rtype-$bdate/$RNAME-$dev-$bdate.zip' \
 	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip')
 if [[ "$RNAME" == *aosp* ]]
 then
-	ALLDEVS=(d2)
+	ALLDEVS=(d2 legacy-d2)
 	DEFDEVS=(d2)
-	UPFMT='dkp/$RPATH/$RNAME-$bdate.zip'
-	#export CROSS_COMPILE=../toolchain/gcc-4_9-20141028/bin/arm-eabi-
-	export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20141206/bin/arm-eabi-
+	UPFMT='$RNAME-${dev//d2/}$bdate.zip'
+	#export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20141206/bin/arm-eabi-
+	export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20150228/bin/arm-eabi-
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
-	UPFMT='dkp/$RPATH/${dev//-/, }/$RNAME-$bdate.zip'
+	UPFMT='$RNAME-$dev-$bdate.zip'
 	export CROSS_COMPILE=../toolchain/linaro-20140426/bin/arm-eabi-
 fi
 
@@ -38,8 +38,10 @@ CFGFMT='cyanogen_$(dev)_defconfig'
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
 
-# FTP server to upload to
-UPHOST=ftp.xstefen.net
+# Upload configuration
+UPDIR='dkp/$RPATH$(sed -n "/legacy/{s/.*/ (old ROMs)/;p}" <<<"$dev")'
+UPLOAD=(mediafire) # ftp
+#FTPHOST=(ftp.example.net ftp.host.com/username)
 
 ###  END OF CONFIGURABLES  ###
 
@@ -52,9 +54,12 @@ askyn() { while :; do echo
 	echo ${NONL:+-n}; [[ "$REPLY" == [Yy] ]]; }
 # Set output vars
 gbt() { dev="$1" eval izip="$ZIPFMT"; }
-# Complete device name; fail on multiple matches
+# Match or complete device name
 cdn() { local dn=($(grep -o "[-a-z0-9]*$1[-a-z0-9]*" <<<"${ALLDEVS[*]}"));
-	[[ ${#dn[*]} == 1 ]] && dev="${dn[0]}"; }
+	[[ ${#dn[*]} == 1 ]] && { dev="${dn[0]}"; return; } || {
+		for d in "${ALLDEVS[@]}"; do [[ "$1" == "$d" ]] && dev="$d" && return; done; false
+	}
+}
 # Fancy termination messages
 die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
 # ADB shell with return value
@@ -76,6 +81,7 @@ v="$1"
 while [[ "$v" ]]
 do
 	case "$v" in
+	(a|--all) devs=("${ALLDEVS[@]}");;
 	(c|--config)
 		CF=true
 		# If next arg is a valid kconfig target, assume it requires
@@ -99,6 +105,7 @@ do
 			Devices: (edit $0 to update list)
 			 ${ALLDEVS[*]}
 			Options:
+			 -a (--all): build all devices
 			 -c (--config) [<target>]: configure each device before building
 			 -C (--clean): make clean for each device before building
 			 -f (--flash): automagically flash
@@ -112,7 +119,7 @@ do
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if [[ "$1" == --* ]] || ! getopts "cCfFmnNsu" v "$1"
+	if [[ "$1" == --* ]] || ! getopts "acCfFmnNsu" v "$1"
 	then
 		shift
 		v="$1"
@@ -217,9 +224,12 @@ savemap-%: $($BLD && echo build-%)
 	@xz -c "\$(tree)/System.map" >"\$(izip:.zip=.map)"
 
 strip-%: $($BLD && echo build-%)
-	@echo "Stripping modules for \$(dev)..."
-	@find "\$(tree)"/*/ -name '*.ko' -a -printf 'Stripping %p...\n' -exec \
-		"${CROSS_COMPILE#../}strip" --strip-unneeded \{\} \; &>>"\$(log)"
+	@if grep -q "^CONFIG_MODULES=y" "\$(tree)/.config"; \
+	then \
+		echo "Stripping modules for \$(dev)..."; \
+		find "\$(tree)"/*/ -name '*.ko' -a -printf 'Stripping %p...\n' -exec \
+		"${CROSS_COMPILE#../}strip" --strip-unneeded \{\} \; &>>"\$(log)"; \
+	fi
 
 package-%: strip-% $($BLD && echo build-%)
 	@echo "Packaging \$(dev)..."
@@ -319,15 +329,16 @@ fi
 
 if $UP
 then
-	if askyn "Upload to $UPHOST?"
+	if askyn "Upload builds?"
 	then
-		copt=
+		upparam=()
 		for dev in "${devs[@]}"
 		do
 			gbt "$dev"
-			eval path=\"$UPFMT\"
-			copt="$copt -T \"$izip\" \"ftp://$UPHOST/$path\""
+			eval rfn=\""$UPFMT"\"
+			eval rp=\""$UPDIR"\"
+			upparam=("${upparam[@]}" "$izip" "$rp" "$rfn")
 		done
-		eval curl -n --ftp-create-dirs $copt
+		. upload/upload.sh
 	fi
 fi
