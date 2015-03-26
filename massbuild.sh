@@ -22,7 +22,7 @@ if [[ "$RNAME" == *aosp* ]]
 then
 	ALLDEVS=(d2 legacy-d2)
 	DEFDEVS=(d2)
-	UPFMT='$RNAME-${dev//d2/}$bdate.zip'
+	UPFMT='$RNAME-$dev-$bdate.zip'
 	#export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20141206/bin/arm-eabi-
 	export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20150228/bin/arm-eabi-
 else
@@ -275,7 +275,7 @@ then
 				flashdev="$(adbsh 'getprop ro.product.device')" || \
 				flashdev="$(adbsh 'sed -n "/^ro.product.device/{s/.*=//;p}" /default.prop')"
 			fi
-			if [[ "$RNAME" == "dkp-aosp44" ]]
+			if [[ "$RNAME" == "dkp-aosp"* ]]
 			then
 				if [[ "$flashdev" == "d2"* ]]
 				then flashdev=d2
