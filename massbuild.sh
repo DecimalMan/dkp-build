@@ -6,8 +6,8 @@ export KBUILD_BUILD_USER=decimalman
 
 # Kernel source location, relative to massbuild.sh
 if [[ "$TW" == "yup" ]]
-then KSRC=../tw
-else KSRC=../dkp
+then	KSRC=../tw
+else	KSRC=../dkp
 fi
 
 # Kernel name used for paths/filenames
@@ -22,13 +22,12 @@ maybe-branch() { [[ "$branch" == dkp* ]] || echo "$branch"-; }
 
 if [[ "$RNAME" == *aosp* ]]
 then
-	ALLDEVS=(d2 legacy-d2)
+	ALLDEVS=(5.1:d2 5.0:d2 4.4:d2 4.4:legacy)
 	DEFDEVS=(d2)
-	#export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20141206/bin/arm-eabi-
 	export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20150228/bin/arm-eabi-
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
-	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
+	DEFDEVS=(d2spr-d2vmu)
 	export CROSS_COMPILE=../toolchain/linaro-20140426/bin/arm-eabi-
 fi
 
@@ -46,13 +45,18 @@ UPLOAD=(mediafire) # ftp
 
 ###  END OF CONFIGURABLES  ###
 
-devs=()
+tmpdevs=()
 flashdev=
 
 # Quick prompt
 askyn() { while :; do echo
 	read -n 1 -p "$* "; [[ "$REPLY" == [YyNn] ]] && break; done
 	echo ${NONL:+-n}; [[ "$REPLY" == [Yy] ]]; }
+# Fancy termination messages
+die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
+# ADB shell with return value
+adbsh() { ((r="$(adb -d shell "$@; echo \$?" | sed 's/\r//' | tee >(sed '$d' >&3) | tail -n 1)" && exit $r) 3>&1) }
+
 # Recall device vars
 gbt() {
 	IFS=: read branch device <<<"$1"
@@ -85,19 +89,30 @@ cdn() {
 		if ! [[ "$(cd "$KSRC" && git branch --list "$branch")" ]]
 		then
 			brs=($(cd "$KSRC" && git branch --list "*$branch*" | sed 's/^[ *]\{2\}//'))
-			[[ "${#brs[@]}" -gt 1 ]] && die "$branch matches multiple branches!"
+			[[ "${#brs[@]}" -gt 1 ]] && die 1 "$branch matches multiple branches!"
 			branch="${brs[0]}"
 		fi
 	fi
 
-	# TODO: check for defconfig instead of devicename arrays
-	local dn=($(grep -o "[-a-z0-9]*$device[-a-z0-9]*" <<<"${ALLDEVS[*]}"));
-	if [[ ${#dn[@]} == 1 ]]
-	then	device="${dn[0]}"
+	# List defconfigs
+	if [[ "$branch" ]]
+	then	local dcs="$(cd "$KSRC" && git ls-tree --name-only "$branch:arch/arm/configs")"
+	else	local dcs="$(ls "$KSRC/arch/arm/configs")"
+	fi
+
+	# Extract device names from matching defconfigs
+	device() { echo "\\(.*${device}.*\\)"; }
+	eval dcs=($(eval sed -n "/$CFGFMT/{s/$CFGFMT/\\\\1/\;p}" <<<"$dcs"))
+
+	# Match or complete device name
+	if [[ ${#dcs[@]} == 0 ]]
+	then	die 1 "device $device not found!"
+	elif [[ ${#dcs[@]} == 1 ]]
+	then	device="${dcs[0]}"
 	else
 		local fail=y
-		for d in "${ALLDEVS[@]}"; do [[ "$device" == "$d" ]] && fail= && break; done
-		[[ "$fail" ]] && die "$device matches multiple devices!"
+		for d in "${dcs[@]}"; do [[ "$device" == "$d" ]] && fail= && break; done
+		[[ "$fail" ]] && die 1 "$device matches multiple devices!"
 	fi
 
 	if [[ "$branch" ]]
@@ -105,10 +120,6 @@ cdn() {
 	else	dev="$device"
 	fi
 }
-# Fancy termination messages
-die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
-# ADB shell with return value
-adbsh() { ((r="$(adb -d shell "$@; echo \$?" | sed 's/\r//' | tee >(sed '$d' >&3) | tail -n 1)" && exit $r) 3>&1) }
 
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -126,7 +137,7 @@ v="$1"
 while [[ "$v" ]]
 do
 	case "$v" in
-	(a|--all) devs=("${ALLDEVS[@]}");;
+	(a|--all) tmpdevs=("${ALLDEVS[@]}");;
 	(c|--config)
 		CF=true
 		# If next arg is a valid kconfig target, assume it requires
@@ -143,12 +154,10 @@ do
 	(u|--upload) UP=true;;
 	(-[^-]*);;
 	(*) 	if cdn "$v"
-		then devs=("${devs[@]}" "$dev")
+		then	tmpdevs=("${tmpdevs[@]}" "$dev")
 		else
 			cat >&2 <<-EOF
 			Usage: $0 [options] [devices]
-			Devices: (edit $0 to update list)
-			 ${ALLDEVS[*]}
 			Options:
 			 -a (--all): build all devices
 			 -c (--config) [<target>]: configure each device before building
@@ -173,7 +182,15 @@ do
 done
 
 # Make sure we have devices to build
-[[ "${devs[*]}" ]] || devs=("${DEFDEVS[@]}")
+[[ "${tmpdevs[*]}" ]] || tmpdevs=("${DEFDEVS[@]}")
+
+# Expand abbreviated devices
+devs=()
+for d in "${tmpdevs[@]}"
+do
+	cdn "$d"
+	devs=("${devs[@]}" "$dev")
+done
 
 # Mangle devices for make
 for n in `seq 0 $((${#devs[@]}-1))`; do
@@ -195,19 +212,19 @@ fi
 # defconfig to run first and needs stdin.  Still, it's nice to have.
 KB="\$(MAKE) -S -C \"\$(ksrc)\" O=\"\$(tree)\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
 if [[ "$RNAME" != "dkp-aosp"* ]]
-then dc="$CFGFMT"
-else dc="VARIANT_DEFCONFIG=$CFGFMT SELINUX_DEFCONFIG=m2selinux_defconfig cyanogen_d2_defconfig"
+then	dc="$CFGFMT"
+else	dc="VARIANT_DEFCONFIG=$CFGFMT SELINUX_DEFCONFIG=m2selinux_defconfig cyanogen_d2_defconfig"
 fi
 # Explicitly use GNU make when available.
 m="$(which gmake make 2>&- | head -n 1)" || true
 [[ "$m" ]] || die 1 "make not found; can't build."
 "$m" -v 2>&- | grep -q GNU || echo "make isn't GNU make.  Expect problems."
 if [[ "$cfg" ]]
-then mj=
+then	mj=
 else
 	if [[ "$MAKEJOBS" ]]
-	then pc="$MAKEJOBS"
-	else pc="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
+	then	pc="$MAKEJOBS"
+	else	pc="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
 	fi
 	if [[ "$LTOPART" ]]
 	then	lp="$LTOPART"
@@ -239,8 +256,8 @@ echo $dev: \
 	$($PKG && echo package-${dev})
 
 if [[ "$branch" ]]
-then echo gen_ksrc-$dev: $ksrc
-else echo gen_ksrc-$dev:
+then	echo gen_ksrc-$dev: $ksrc
+else	echo gen_ksrc-$dev:
 fi
 done)
 
@@ -314,7 +331,7 @@ package-%: strip-% $($BLD && echo build-%)
 	 let sz=\$\$(stat -c %s "\$(izip)"); \
 	 echo "\$(notdir \$(izip)): zImage: \$\$sbi; data: \$\$sd; zip: \$\$sz"
 
-.PHONY: init-% build-% savemap-% package-% clean-% config-% ksrc-% ${mdevs[@]}
+.PHONY: init-% build-% savemap-% package-% clean-% config-% gen_ksrc-% ksrc-% cleanlog-% ${mdevs[@]}
 EOF
 )
 then
@@ -348,7 +365,7 @@ then
 			if [[ "$RNAME" == "dkp-aosp"* ]]
 			then
 				if [[ "$flashdev" == "d2"* ]]
-				then flashdev=d2
+				then	flashdev=d2
 				else
 					NONL=y askyn "No suitable device connected.  Retry?" || \
 					break
@@ -375,8 +392,8 @@ then
 				die 1 "can't find device's $FLASH storage."
 
 			if [[ "$FLASH" == "internal" ]]
-			then recdir="/sdcard"
-			else recdir="/storage/sdcard1"
+			then	recdir="/sdcard"
+			else	recdir="/storage/sdcard1"
 			fi
 
 			gbt "$flashdev"
