@@ -106,7 +106,7 @@ cdn() {
 
 	# Match or complete device name
 	if [[ ${#dcs[@]} == 0 ]]
-	then	die 1 "device $device not found!"
+	then	return 1;
 	elif [[ ${#dcs[@]} == 1 ]]
 	then	device="${dcs[0]}"
 	else
@@ -164,10 +164,10 @@ do
 			 -C (--clean): make clean for each device before building
 			 -f (--flash): automagically flash
 			 -m (--modules): just build modules
-			 -n (--no-package): just build, don't package
-			 -N (--no-build): don't rebuild the kernel
+			 -n (--no-package): don't package
+			 -N (--no-build): don't build
 			 -s (--sparse): build with C=1 to run sparse
-			 -u (--upload): upload builds to FTP
+			 -u (--upload): upload builds
 			EOF
 			exit 1
 		fi
