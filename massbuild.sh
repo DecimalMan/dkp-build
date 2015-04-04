@@ -16,30 +16,31 @@ RNAME="$(sed -n '/^DKP_NAME/{s/[^=]*=\W*//;p}' $KSRC/Makefile)"
 ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 
 # Format used for filenames, relative to massbuild.sh
-ZIPFMT=('out/$rtype-$bdate/$RNAME-$dev-$bdate.zip' \
-	'out/$rtype/$RNAME-$dev-$bdate-$ENAME.zip')
+ZIPFMT='out/$zpath/$rname-$device-$bdate-$branch.zip'
+UPFMT='$rname-$(maybe-branch)$device-$bdate.zip'
+maybe-branch() { [[ "$branch" == dkp* ]] || echo "$branch"-; }
+
 if [[ "$RNAME" == *aosp* ]]
 then
 	ALLDEVS=(d2 legacy-d2)
 	DEFDEVS=(d2)
-	UPFMT='$RNAME-$dev-$bdate.zip'
 	#export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20141206/bin/arm-eabi-
 	export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20150228/bin/arm-eabi-
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
-	UPFMT='$RNAME-$dev-$bdate.zip'
 	export CROSS_COMPILE=../toolchain/linaro-20140426/bin/arm-eabi-
 fi
 
 # defconfig format, will be expanded per-device
-CFGFMT='cyanogen_$(dev)_defconfig'
+CFGFMT='cyanogen_$(device)_defconfig'
 
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
 
 # Upload configuration
-UPDIR='dkp/$RPATH$(sed -n "/legacy/{s/.*/ (old ROMs)/;p}" <<<"$dev")'
+UPDIR='dkp/$rpath$(maybe-legacy)'
+maybe-legacy() { [[ "$device" != *legacy* ]] || echo " (old ROMs)"; }
 UPLOAD=(mediafire) # ftp
 #FTPHOST=(ftp.example.net ftp.host.com/username)
 
@@ -52,13 +53,57 @@ flashdev=
 askyn() { while :; do echo
 	read -n 1 -p "$* "; [[ "$REPLY" == [YyNn] ]] && break; done
 	echo ${NONL:+-n}; [[ "$REPLY" == [Yy] ]]; }
-# Set output vars
-gbt() { dev="$1" eval izip="$ZIPFMT"; }
-# Match or complete device name
-cdn() { local dn=($(grep -o "[-a-z0-9]*$1[-a-z0-9]*" <<<"${ALLDEVS[*]}"));
-	[[ ${#dn[*]} == 1 ]] && { dev="${dn[0]}"; return; } || {
-		for d in "${ALLDEVS[@]}"; do [[ "$1" == "$d" ]] && dev="$d" && return; done; false
-	}
+# Recall device vars
+gbt() {
+	IFS=: read branch device <<<"$1"
+	[[ "$device" ]] || { device="$1"; branch=; }
+
+	if [[ "$branch" ]]
+	then
+		ksrc="ksrc-$branch"
+		txt="$(cd "$KSRC" && git show "$branch:Makefile" | grep '^DKP_')"
+		rpath="$(sed -n '/^DKP_LABEL/{s/[^=]*=\W*//;p}' <<<"$txt")"
+		rname="$(sed -n '/^DKP_NAME/{s/[^=]*=\W*//;p}' <<<"$txt")"
+		# make doesn't like colons in target names
+		dev="${branch}_${device}"
+	else
+		branch="$ENAME"
+		ksrc="$KSRC"
+		rpath="$RPATH"
+		rname="$RNAME"
+	fi
+
+	eval izip="$ZIPFMT"
+}
+# Match or complete [branch:]device name
+cdn() {
+	IFS=: read branch device <<<"$1"
+	[[ "$device" ]] || { device="$1"; branch=; }
+
+	if [[ "$branch" ]]
+	then
+		if ! [[ "$(cd "$KSRC" && git branch --list "$branch")" ]]
+		then
+			brs=($(cd "$KSRC" && git branch --list "*$branch*" | sed 's/^[ *]\{2\}//'))
+			[[ "${#brs[@]}" -gt 1 ]] && die "$branch matches multiple branches!"
+			branch="${brs[0]}"
+		fi
+	fi
+
+	# TODO: check for defconfig instead of devicename arrays
+	local dn=($(grep -o "[-a-z0-9]*$device[-a-z0-9]*" <<<"${ALLDEVS[*]}"));
+	if [[ ${#dn[@]} == 1 ]]
+	then	device="${dn[0]}"
+	else
+		local fail=y
+		for d in "${ALLDEVS[@]}"; do [[ "$device" == "$d" ]] && fail= && break; done
+		[[ "$fail" ]] && die "$device matches multiple devices!"
+	fi
+
+	if [[ "$branch" ]]
+	then	dev="$branch:$device"
+	else	dev="$device"
+	fi
 }
 # Fancy termination messages
 die() { echo "$((exit "$1") && echo "Finished" || echo "Fatal"): $2"; exit "$1"; }
@@ -130,22 +175,26 @@ done
 # Make sure we have devices to build
 [[ "${devs[*]}" ]] || devs=("${DEFDEVS[@]}")
 
+# Mangle devices for make
+for n in `seq 0 $((${#devs[@]}-1))`; do
+	mdevs=("${mdevs[@]}" "$(tr : _ <<<"${devs[$n]}")")
+done
+
 # Use a more informative naming scheme for experimental builds
 if ! $UP
 then
 	bdate="$(date +%Y%m%d-%H%M%S)"
-	rtype="experimental"
-	ZIPFMT="${ZIPFMT[1]}"
+	zpath="experimental"
 else
 	bdate="$(date +%Y%m%d)"
-	rtype="release"
+	zpath="release-$bdate"
 fi
 
 # Use the make jobserver to sort out building everything
 # oldconfig is a huge pain, since it won't run with multiple jobs, needs
 # defconfig to run first and needs stdin.  Still, it's nice to have.
-KB="\$(MAKE) -S -C \"$KSRC\" O=\"\$(tree)\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
-if [[ "$RNAME" != "dkp-aosp43" ]]
+KB="\$(MAKE) -S -C \"\$(ksrc)\" O=\"\$(tree)\" V=1" # CONFIG_DEBUG_SECTION_MISMATCH=y"
+if [[ "$RNAME" != "dkp-aosp"* ]]
 then dc="$CFGFMT"
 else dc="VARIANT_DEFCONFIG=$CFGFMT SELINUX_DEFCONFIG=m2selinux_defconfig cyanogen_d2_defconfig"
 fi
@@ -163,42 +212,62 @@ else
 	if [[ "$LTOPART" ]]
 	then	lp="$LTOPART"
 	else	mt="$(sed -n '/MemTotal/{s/[^0-9]//g;p}' /proc/meminfo)"
-		((lp=31457280*pc/mt, lp=lp>32?32:lp<pc?pc:lp, lp-=lp%pc))
+		((lp=31457280*pc/mt, lp=lp>32?32:lp<pc?pc:lp, lp+=pc-lp%pc))
 		echo "Building with $lp LTO partitions..."
 	fi
 	mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
 fi
-if ! nice "$m" $mj "${devs[@]}" -k -f <(cat <<EOF
+
+[[ "$DUMPMAKE" ]] && nice() { cat -n ${!#}; }
+if ! nice "$m" $mj "${mdevs[@]}" -k -f <(cat <<EOF
 $(for dev in ${devs[@]}
 do gbt "$dev"
-echo $dev: tree = $PWD/kbuild-$RNAME-${dev}
+echo $dev: tree = $PWD/kbuild-${branch}-${device}
+echo $dev: ksrc = $ksrc
 echo $dev: izip = $PWD/$izip
-echo $dev: isrc = $PWD/installer-$RNAME
-echo $dev: dev = ${dev}
+echo $dev: isrc = $PWD/installer-$rname
+echo $dev: dev = ${branch}_${device}
+echo $dev: pretty = ${branch}:${device}
+echo $dev: branch = $branch
+echo $dev: device = $device
 echo $dev: log = build-${dev}.log
-echo $dev: fail = .failed-$RNAME-${dev}
+echo $dev: fail = .failed-${dev}
 echo $dev: \
 	$($CF && echo config-${dev}) \
 	$($BLD && echo build-${dev}) \
 	$($UP && echo savemap-${dev}) \
 	$($PKG && echo package-${dev})
+
+if [[ "$branch" ]]
+then echo gen_ksrc-$dev: $ksrc
+else echo gen_ksrc-$dev:
+fi
 done)
 
-${devs[@]}:
+_FORCE:
+
+${mdevs[@]}:
 	@echo "Finished building \$(dev)"
 	@rm -f "\$(fail)"
 
-init-%:
-	@touch "\$(fail)"
-	@mkdir -p "\$(tree)"
+cleanlog-%:
 	@rm -f "\$(log)"
 
+ksrc-%: cleanlog-% _FORCE
+	@echo "Checking out branch \$(branch)..."
+	@[[ -d "\$(ksrc)/.git" ]] || git clone -q --shared --no-checkout "$KSRC" "\$(ksrc)" &>>\$(log)
+	@cd "\$(ksrc)" && git checkout -q "\$(branch)" &>>\$(log)
+
+init-%: cleanlog-% gen_ksrc-%
+	@touch "\$(fail)"
+	@mkdir -p "\$(tree)"
+
 build-%: init-% $($CL && echo clean-%) $($CF && echo config-%)
-	@echo "Making $($KO && echo modules || echo all) for \$(dev)..."
+	@echo "Making $($KO && echo modules || echo all) for \$(pretty)..."
 	@rm -f "\$(tree)/.version"
 	@$KB $($KO && echo modules) $($SP && echo C=1 CF=-D__CHECK_ENDIAN__) \
 		&>>\$(log); rv=\$\$?; \
-	 echo "\$(dev):" \
+	 echo "\$(pretty):" \
 	 "\`grep 'warning:' \$(log) | wc -l\` warnings," \
 	 "\`grep 'error:' \$(log) | wc -l\` errors"; \
 	 exit \$\$rv
@@ -206,33 +275,33 @@ build-%: init-% $($CL && echo clean-%) $($CF && echo config-%)
 config-%: init-% $($CL && echo clean-%)
 $(if [[ "$cfg" ]]
 then
-echo "	@echo Making $cfg for \$(dev)..."
+echo "	@echo Making $cfg for \$(pretty)..."
 echo "	@$KB -s $cfg 2>>\"\$(log)\""
 echo "	@rm -f \"\$(fail)\""
 else
-echo "	@echo Making $CFGFMT..."
+echo "	@echo Making ${CFGFMT} for \$(pretty)..."
 echo "	@$KB $dc &>>\"\$(log)\""
 fi)
 
 clean-%: init-%
-	@echo "Cleaning \$(dev)..."
+	@echo "Cleaning \$(pretty)..."
 	@$KB clean &>>"\$(log)"
 
 savemap-%: $($BLD && echo build-%)
-	@echo "Saving System.map for \$(dev)..."
+	@echo "Saving System.map for \$(pretty)..."
 	@mkdir -p "\$(dir \$(izip))"
 	@xz -c "\$(tree)/System.map" >"\$(izip:.zip=.map)"
 
 strip-%: $($BLD && echo build-%)
 	@if grep -q "^CONFIG_MODULES=y" "\$(tree)/.config"; \
 	then \
-		echo "Stripping modules for \$(dev)..."; \
+		echo "Stripping modules for \$(pretty)..."; \
 		find "\$(tree)"/*/ -name '*.ko' -a -printf 'Stripping %p...\n' -exec \
 		"${CROSS_COMPILE#../}strip" --strip-unneeded \{\} \; &>>"\$(log)"; \
 	fi
 
 package-%: strip-% $($BLD && echo build-%)
-	@echo "Packaging \$(dev)..."
+	@echo "Packaging \$(pretty)..."
 	@rm -rf "\$(tree)/.package"
 	@cp -r "\$(isrc)" "\$(tree)/.package"
 	@mkdir -p "\$(tree)/.package/system/lib/modules"
@@ -245,14 +314,14 @@ package-%: strip-% $($BLD && echo build-%)
 	 let sz=\$\$(stat -c %s "\$(izip)"); \
 	 echo "\$(notdir \$(izip)): zImage: \$\$sbi; data: \$\$sd; zip: \$\$sz"
 
-.PHONY: init-% build-% savemap-% package-% clean-% config-% ${devs[@]}
+.PHONY: init-% build-% savemap-% package-% clean-% config-% ksrc-% ${mdevs[@]}
 EOF
 )
 then
 	askyn "Review build logs for failed builds?" && \
-		less $(ls ".failed-$RNAME-"* | \
-		sed 's/\.failed-'"$RNAME"'-\([^ ]*\)/build-\1.log/')
-	rm -f ".failed-$RNAME-"*
+		less $(ls ".failed-"* | \
+		sed 's/\.failed-\([^ ]*\)/build-\1.log/')
+	rm -f ".failed-"*
 	die 1 "building failed."
 fi
 
@@ -263,6 +332,7 @@ $BLD && askyn "Review build logs?" && \
 
 ! $PKG && echo && die 0 "packaging disabled by --$($KO && echo modules || echo no-package)."
 
+# TODO: make flashing work with branched builds somehow?
 if $FL
 then
 	if NONL=y askyn "Flash to device?"
@@ -284,10 +354,10 @@ then
 					break
 				fi
 			else
-				cdn "$flashdev" && [[ "${devs[*]}" == *"$dev"* ]] || \
+				cdn "$flashdev" && [[ "${devs[*]}" == *"$device"* ]] || \
 					NONL=y askyn "No suitable device connected.  Retry?" || \
 					break
-				flashdev="$dev"
+				flashdev="$device"
 			fi
 		done
 		echo

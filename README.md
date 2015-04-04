@@ -10,6 +10,7 @@ Notable features:
 
 - Fast multi-device rebuilds, thanks to multiple out-of-tree build directories
 - Top-level make jobserver for efficient parallel building
+- Building from multiple branches in parallel
 - Automatic generation of install zips, with automatic handling of xbin and initscripts
 - Install zip automatically builds boot.img using new zImage and existing ramdisk
 - Automatic flashing to an attached device
@@ -27,3 +28,5 @@ Usage:
 ------
 
 Try ```./massbuild.sh --help```.  My typical usage is ```./massbuild.sh -f d2spr``` until everything works, then ```./massbuild.sh -u``` to publish a new release.  ```./massbuild.sh -Cc``` is handy for fixing even the most broken build tree.
+
+Devices may be specified as "full-dev-name", "dev" (unambiguously autocompleted), or "src-branch:dev".
