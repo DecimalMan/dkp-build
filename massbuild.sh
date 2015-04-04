@@ -258,7 +258,7 @@ fi
 
 [[ "$cfg" ]] && echo && die 0 "restart without --config to build."
 
-askyn "Review build logs?" && \
+$BLD && askyn "Review build logs?" && \
 		less $(sed 's/\(^\| \)\([^ ]*\)/build-\2.log /g' <<<"${devs[*]}")
 
 ! $PKG && echo && die 0 "packaging disabled by --$($KO && echo modules || echo no-package)."
