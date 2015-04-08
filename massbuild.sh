@@ -71,7 +71,7 @@ gbt() {
 		# make doesn't like colons in target names
 		dev="${branch}_${device}"
 	else
-		branch="$ENAME"
+		branch="$RNAME"
 		ksrc="$KSRC"
 		rpath="$RPATH"
 		rname="$RNAME"
