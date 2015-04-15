@@ -1,13 +1,17 @@
 #!/bin/bash -e
+cd "$(dirname "$(readlink -f "$0")")"
 ### CONFIGURABLE SETTINGS: ###
+
+# Build tree location
+BUILD=/var/tmp/massbuild
 
 # Kernel version username
 export KBUILD_BUILD_USER=decimalman
 
 # Kernel source location, relative to massbuild.sh
 if [[ "$TW" == "yup" ]]
-then	KSRC=../tw
-else	KSRC=../dkp
+then	KSRC="$PWD/../tw"
+else	KSRC="$PWD/../dkp"
 fi
 
 # Kernel name used for paths/filenames
@@ -24,11 +28,11 @@ if [[ "$RNAME" == *aosp* ]]
 then
 	ALLDEVS=(5.1:d2 5.0:d2 4.4:d2 4.4:legacy)
 	DEFDEVS=(d2)
-	export CROSS_COMPILE=../toolchain/arm-eabi-gcc-4_9-20150228/bin/arm-eabi-
+	export CROSS_COMPILE="$PWD/toolchain/arm-eabi-gcc-4_9-20150228/bin/arm-eabi-"
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2spr-d2vmu)
-	export CROSS_COMPILE=../toolchain/linaro-20140426/bin/arm-eabi-
+	export CROSS_COMPILE="$PWD/toolchain/linaro-20140426/bin/arm-eabi-"
 fi
 
 # defconfig format, will be expanded per-device
@@ -64,7 +68,7 @@ gbt() {
 
 	if [[ "$branch" ]]
 	then
-		ksrc="ksrc-$branch"
+		ksrc="$BUILD/ksrc-$branch"
 		txt="$(cd "$KSRC" && git show "$branch:Makefile" | grep '^DKP_')"
 		rpath="$(sed -n '/^DKP_LABEL/{s/[^=]*=\W*//;p}' <<<"$txt")"
 		rname="$(sed -n '/^DKP_NAME/{s/[^=]*=\W*//;p}' <<<"$txt")"
@@ -121,8 +125,6 @@ cdn() {
 	fi
 }
 
-cd "$(dirname "$(readlink -f "$0")")"
-
 CF=false
 CL=false
 BLD=true
@@ -150,6 +152,7 @@ do
 	(m|--modules) KO=true; PKG=false;;
 	(n|--no-package) PKG=false;;
 	(N|--no-build) BLD=false;;
+	(r|--release) tmpdevs=("${ALLDEVS[@]}"); CF=true; UP=true;;
 	(s|--sparse) SP=true;;
 	(u|--upload) UP=true;;
 	(-[^-]*);;
@@ -166,6 +169,7 @@ do
 			 -m (--modules): just build modules
 			 -n (--no-package): don't package
 			 -N (--no-build): don't build
+			 -r (--release): build for release (-acu)
 			 -s (--sparse): build with C=1 to run sparse
 			 -u (--upload): upload builds
 			EOF
@@ -173,7 +177,7 @@ do
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if [[ "$1" == --* ]] || ! getopts "acCfFmnNsu" v "$1"
+	if [[ "$1" == --* ]] || ! getopts "acCfFmnNrsu" v "$1"
 	then
 		shift
 		v="$1"
@@ -229,7 +233,7 @@ else
 	if [[ "$LTOPART" ]]
 	then	lp="$LTOPART"
 	else	mt="$(sed -n '/MemTotal/{s/[^0-9]//g;p}' /proc/meminfo)"
-		((lp=31457280*pc/mt, lp=lp>32?32:lp<pc?pc:lp, lp+=pc-lp%pc))
+		((lp=31457280*pc/mt, lp=lp>32?32:lp<pc?pc:lp, lp+=pc-1, lp-=lp%pc))
 		echo "Building with $lp LTO partitions..."
 	fi
 	mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
@@ -239,7 +243,7 @@ fi
 if ! nice "$m" $mj "${mdevs[@]}" -k -f <(cat <<EOF
 $(for dev in ${devs[@]}
 do gbt "$dev"
-echo $dev: tree = $PWD/kbuild-${branch}-${device}
+echo $dev: tree = $BUILD/kbuild-${branch}-${device}
 echo $dev: ksrc = $ksrc
 echo $dev: izip = $PWD/$izip
 echo $dev: isrc = $PWD/installer-$rname
@@ -264,13 +268,16 @@ done)
 _FORCE:
 
 ${mdevs[@]}:
-	@echo "Finished building \$(dev)"
+	@echo "Finished building \$(pretty)"
 	@rm -f "\$(fail)"
 
 cleanlog-%:
 	@rm -f "\$(log)"
 
-ksrc-%: cleanlog-% _FORCE
+$BUILD:
+	@mkdir -p "$BUILD"
+
+$BUILD/ksrc-%: cleanlog-% $BUILD _FORCE
 	@echo "Checking out branch \$(branch)..."
 	@[[ -d "\$(ksrc)/.git" ]] || git clone -q --shared --no-checkout "$KSRC" "\$(ksrc)" &>>\$(log)
 	@cd "\$(ksrc)" && git checkout -q "\$(branch)" &>>\$(log)
@@ -314,7 +321,7 @@ strip-%: $($BLD && echo build-%)
 	then \
 		echo "Stripping modules for \$(pretty)..."; \
 		find "\$(tree)"/*/ -name '*.ko' -a -printf 'Stripping %p...\n' -exec \
-		"${CROSS_COMPILE#../}strip" --strip-unneeded \{\} \; &>>"\$(log)"; \
+		"${CROSS_COMPILE}strip" --strip-unneeded \{\} \; &>>"\$(log)"; \
 	fi
 
 package-%: strip-% $($BLD && echo build-%)
