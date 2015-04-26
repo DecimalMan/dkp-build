@@ -28,7 +28,7 @@ if [[ "$RNAME" == *aosp* ]]
 then
 	ALLDEVS=(5.1:d2 5.0:d2 4.4:d2 4.4:legacy)
 	DEFDEVS=(d2)
-	export CROSS_COMPILE="$PWD/toolchain/arm-eabi-gcc-4_9-20150228/bin/arm-eabi-"
+	export CROSS_COMPILE="$PWD/toolchain/arm-eabi-gcc-4_9-20150425/bin/arm-eabi-"
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2spr-d2vmu)
