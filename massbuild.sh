@@ -279,8 +279,10 @@ $BUILD:
 
 $BUILD/ksrc-%: cleanlog-% $BUILD _FORCE
 	@echo "Checking out branch \$(branch)..."
-	@[[ -d "\$(ksrc)/.git" ]] || git clone -q --shared --no-checkout "$KSRC" "\$(ksrc)" &>>\$(log)
-	@cd "\$(ksrc)" && git checkout -q "\$(branch)" &>>\$(log)
+	@(if [[ -d "\$(ksrc)/.git" ]]; \
+	  then cd "\$(ksrc)" && git pull -q; \
+	  else git clone -qsb "\$(branch)" "$KSRC" "\$(ksrc)"; \
+	  fi) &>>\$(log)
 
 init-%: cleanlog-% gen_ksrc-%
 	@touch "\$(fail)"
