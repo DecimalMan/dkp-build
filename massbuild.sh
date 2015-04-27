@@ -330,9 +330,11 @@ package-%: strip-% $($BLD && echo build-%)
 	@echo "Packaging \$(pretty)..."
 	@rm -rf "\$(tree)/.package"
 	@cp -r "\$(isrc)" "\$(tree)/.package"
-	@mkdir -p "\$(tree)/.package/system/lib/modules"
+	@if grep -q "^CONFIG_MODULES=y" "\$(tree)/.config"; \
+	 then mkdir -p "\$(tree)/.package/system/lib/modules"; \
+	 find "\$(tree)"/* -name '*.ko' -exec cp \{\} "\$(tree)/.package/system/lib/modules" \;; \
+	 fi
 	@cp "\$(tree)/arch/arm/boot/zImage" "\$(tree)/.package/dkp-zImage"
-	@find "\$(tree)"/* -name '*.ko' -exec cp \{\} "\$(tree)/.package/system/lib/modules" \;
 	@mkdir -p "\$(dir \$(izip))"
 	@cd "\$(tree)/.package" && zip -r "\$(izip)" * &>>"\$(log)"
 	@let sbi=\$\$(stat -c %s "\$(tree)/.package/dkp-zImage"); \
