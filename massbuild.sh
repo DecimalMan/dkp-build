@@ -74,14 +74,15 @@ gbt() {
 		rname="$(sed -n '/^DKP_NAME/{s/[^=]*=\W*//;p}' <<<"$txt")"
 		# make doesn't like colons in target names
 		dev="${branch}_${device}"
+		eval izip="$ZIPFMT"
 	else
-		branch="$RNAME"
 		ksrc="$KSRC"
 		rpath="$RPATH"
 		rname="$RNAME"
+		branch="$ENAME"
+		eval izip="$ZIPFMT"
+		branch="$RNAME"
 	fi
-
-	eval izip="$ZIPFMT"
 }
 # Match or complete [branch:]device name
 cdn() {
