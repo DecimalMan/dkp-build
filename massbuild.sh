@@ -376,8 +376,8 @@ then
 			fi
 			if [[ "$RNAME" == "dkp-aosp"* ]]
 			then
-				if [[ "$flashdev" == "d2"* ]]
-				then	flashdev=d2
+				if [[ "$flashdev" == "d2"* && ${#devs[*]} == 1 && "$(gbt ${devs[0]}; echo "$device")" == "d2" ]]
+				then	flashdev="${devs[0]}"
 				else
 					NONL=y askyn "No suitable device connected.  Retry?" || \
 					break
