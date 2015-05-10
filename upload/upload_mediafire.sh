@@ -13,5 +13,5 @@ upload_mediafire() {
 		param=("${param[@]}" "--folder=$p" "$f:$n")
 		shift 3
 	done
-	parallel -v -n2 -j2 plowup mediafire ::: "${param[@]}"
+	parallel -n2 -j3 plowup -v1 mediafire ::: "${param[@]}"
 }
