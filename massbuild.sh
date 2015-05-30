@@ -5,7 +5,6 @@
 BUILD=/var/tmp/massbuild
 
 # Location of massbuild.sh
-#cd "$(dirname "$(readlink -f "$0")")"
 HERE="$(dirname "$(readlink -f "$0")")"
 
 # Kernel version username
