@@ -315,9 +315,10 @@ clean-%: init-%
 	@$KB clean &>>"\$(log)"
 
 savemap-%: $($BLD && echo build-%)
-	@echo "Saving System.map for \$(pretty)..."
+	@echo "Saving System.map & vmlinux for \$(pretty)..."
 	@mkdir -p "\$(dir \$(izip))"
-	@xz -c "\$(tree)/System.map" >"\$(izip:.zip=.map)"
+	@xz -c "\$(tree)/System.map" >"\$(izip:.zip=.map.xz)"
+	@xz -c "\$(tree)/vmlinux" >"\$(izip:.zip=.vmlinux.xz)"
 
 strip-%: $($BLD && echo build-%)
 	@if grep -q "^CONFIG_MODULES=y" "\$(tree)/.config"; \
