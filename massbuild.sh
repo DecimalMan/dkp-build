@@ -21,8 +21,6 @@ ENAME="$(cd "$KSRC" && git symbolic-ref --short HEAD 2>&-)" || ENAME=no-branch
 
 # Format used for filenames, relative to massbuild.sh
 ZIPFMT='out/$zpath/$rname-$device-$bdate-$branch.zip'
-UPFMT='$rname-$(maybe-branch)$device-$bdate.zip'
-maybe-branch() { [[ "$branch" == dkp* ]] || echo "$branch"-; }
 
 if [[ "$RNAME" == *aosp* ]]
 then
@@ -42,10 +40,15 @@ CFGFMT='cyanogen_$(device)_defconfig'
 FLASH=external
 
 # Upload configuration
+UPFMT='$rname-$(maybe-branch)$device-$bdate.zip'
 UPDIR='dkp/$rpath$(maybe-legacy)'
-maybe-legacy() { [[ "$device" != *legacy* ]] || echo " (old ROMs)"; }
+UPDIR_EXP='dkp/Scary Tests'
 UPLOAD=(mediafire) # ftp
 #FTPHOST=(ftp.example.net ftp.host.com/username)
+
+# Upload format helper functions
+maybe-branch() { [[ "$branch" == dkp* ]] || echo "$branch"-; }
+maybe-legacy() { [[ "$device" != *legacy* ]] || echo " (old ROMs)"; }
 
 ###  END OF CONFIGURABLES  ###
 
@@ -133,6 +136,7 @@ PKG=true
 FL=false
 FLASH_NOREBOOT=false
 UP=false
+EXP=false
 KO=false
 SP=false
 cfg=
@@ -148,8 +152,9 @@ do
 		[[ "$2" != -* ]] && grep -q "^$2:" "$KSRC/scripts/kconfig/Makefile" 2>&- && \
 		{ cfg="$2"; s="$1"; shift 2; set -- "$s" "$@"; } && BLD=false && PKG=false;;
 	(C|--clean) CL=true;;
+	(e|--exp|--experimental) EXP=true;;
 	(f|--flash) FL=true;;
-	(F) FL=true; FLASH_NOREBOOT=true;;
+	(F|--flash-noinst) FL=true; FLASH_NOREBOOT=true;;
 	(m|--modules) KO=true; PKG=false;;
 	(n|--no-package) PKG=false;;
 	(N|--no-build) BLD=false;;
@@ -166,7 +171,9 @@ do
 			 -a (--all): build all devices
 			 -c (--config) [<target>]: configure each device before building
 			 -C (--clean): make clean for each device before building
+			 -e (--experimental): upload builds to an "experimental" directory
 			 -f (--flash): automagically flash
+			 -F (--flash-noinst): push to device but don't install
 			 -m (--modules): just build modules
 			 -n (--no-package): don't package
 			 -N (--no-build): don't build
@@ -174,11 +181,12 @@ do
 			 -s (--sparse): build with C=1 to run sparse
 			 -u (--upload): upload builds
 			EOF
+			#' quit it, vim.
 			exit 1
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if [[ "$1" == --* ]] || ! getopts "acCfFmnNrsu" v "$1"
+	if [[ "$1" == --* ]] || ! getopts "acCefFmnNrsu" v "$1"
 	then
 		shift
 		v="$1"
@@ -436,7 +444,10 @@ then
 		do
 			gbt "$dev"
 			eval rfn=\""$UPFMT"\"
-			eval rp=\""$UPDIR"\"
+			if $EXP
+			then eval rp=\""$UPDIR_EXP"\"
+			else eval rp=\""$UPDIR"\"
+			fi
 			upparam=("${upparam[@]}" "$izip" "$rp" "$rfn")
 		done
 		. upload/upload.sh
