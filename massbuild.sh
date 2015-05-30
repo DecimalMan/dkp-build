@@ -1,17 +1,20 @@
 #!/bin/bash -e
-cd "$(dirname "$(readlink -f "$0")")"
 ### CONFIGURABLE SETTINGS: ###
 
 # Build tree location
 BUILD=/var/tmp/massbuild
+
+# Location of massbuild.sh
+#cd "$(dirname "$(readlink -f "$0")")"
+HERE="$(dirname "$(readlink -f "$0")")"
 
 # Kernel version username
 export KBUILD_BUILD_USER=decimalman
 
 # Kernel source location, relative to massbuild.sh
 if [[ "$TW" == "yup" ]]
-then	KSRC="$PWD/../tw"
-else	KSRC="$PWD/../dkp"
+then	KSRC="$HERE/../tw"
+else	KSRC="$HERE/../dkp"
 fi
 
 # Kernel name used for paths/filenames
@@ -26,11 +29,11 @@ if [[ "$RNAME" == *aosp* ]]
 then
 	ALLDEVS=(5.1:d2 4.4:d2 4.4:legacy)
 	DEFDEVS=(d2)
-	export CROSS_COMPILE="$PWD/toolchain/arm-eabi-gcc-4_9-20150425/bin/arm-eabi-"
+	export CROSS_COMPILE="$HERE/toolchain/arm-eabi-gcc-4_9-20150425/bin/arm-eabi-"
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2spr-d2vmu)
-	export CROSS_COMPILE="$PWD/toolchain/linaro-20140426/bin/arm-eabi-"
+	export CROSS_COMPILE="$HERE/toolchain/linaro-20140426/bin/arm-eabi-"
 fi
 
 # defconfig format, will be expanded per-device
@@ -254,8 +257,8 @@ $(for dev in ${devs[@]}
 do gbt "$dev"
 echo $dev: tree = $BUILD/kbuild-${branch}-${device}
 echo $dev: ksrc = $ksrc
-echo $dev: izip = $PWD/$izip
-echo $dev: isrc = $PWD/installer-$rname
+echo $dev: izip = $HERE/$izip
+echo $dev: isrc = $HERE/installer-$rname
 echo $dev: dev = ${branch}_${device}
 echo $dev: pretty = ${branch}:${device}
 echo $dev: branch = $branch
