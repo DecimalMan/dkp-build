@@ -28,7 +28,7 @@ if [[ "$RNAME" == *aosp* ]]
 then
 	ALLDEVS=(5.1:d2 4.4:d2 4.4:legacy)
 	DEFDEVS=(d2)
-	export CROSS_COMPILE="$HERE/toolchain/arm-eabi-gcc-4_9-20150425/bin/arm-eabi-"
+	export CROSS_COMPILE="$HERE/toolchain/arm-eabi-git51-20150618/bin/arm-eabi-"
 else
 	ALLDEVS=(d2att-d2tmo d2spr-d2vmu d2usc-d2cri d2vzw)
 	DEFDEVS=(d2spr-d2vmu)
@@ -45,8 +45,8 @@ FLASH=external
 UPFMT='$rname-$(maybe-branch)$device-$bdate.zip'
 UPDIR='dkp/$rpath$(maybe-legacy)'
 UPDIR_EXP='dkp/Scary Tests'
-UPLOAD=(mediafire) # ftp
-#FTPHOST=(ftp.example.net ftp.host.com/username)
+UPLOAD=(solidfiles mediafire) # ftp
+#FTPHOST=(ftp.example.tld/base/path another.host.tld/path)
 
 # Upload format helper functions
 maybe-branch() { [[ "$branch" == dkp* ]] || echo "$branch"-; }
@@ -141,6 +141,7 @@ UP=false
 EXP=false
 KO=false
 SP=false
+SM=false
 cfg=
 v="$1"
 while [[ "$v" ]]
@@ -160,8 +161,10 @@ do
 	(m|--modules) KO=true; PKG=false;;
 	(n|--no-package) PKG=false;;
 	(N|--no-build) BLD=false;;
-	(r|--release) tmpdevs=("${ALLDEVS[@]}"); CF=true; UP=true;;
+	(r|--release) tmpdevs=("${ALLDEVS[@]}"); CF=true; UP=true
+		MAKEJOBS="${MAKEJOBS:-8}"; LTOPART="${LTOPART:-4}";;
 	(s|--sparse) SP=true;;
+	(S|--section-mismatch) SM=true;;
 	(u|--upload) UP=true;;
 	(-[^-]*);;
 	(*) 	if cdn "$v"
@@ -181,6 +184,7 @@ do
 			 -N (--no-build): don't build
 			 -r (--release): build for release (-acu)
 			 -s (--sparse): build with C=1 to run sparse
+			 -S (--section-mismatch): build with CONFIG_DEBUG_SECTION_MISMATCH=y
 			 -u (--upload): upload builds
 			EOF
 			#' quit it, vim.
@@ -188,7 +192,7 @@ do
 		fi
 	esac
 	# Can't use getopt since BSD's sucks.
-	if [[ "$1" == --* ]] || ! getopts "acCefFmnNrsu" v "$1"
+	if [[ "$1" == --* ]] || ! getopts "acCefFmnNrsSu" v "$1"
 	then
 		shift
 		v="$1"
@@ -241,14 +245,10 @@ else
 	then	pc="$MAKEJOBS"
 	else	pc="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
 	fi
-	if [[ "$LTOPART" ]]
-	then	lp="$LTOPART"
-	else	mt="$(sed -n '/MemTotal/{s/[^0-9]//g;p}' /proc/meminfo)"
-		((lp=31457280*pc/mt, lp=lp>32?32:lp<pc?pc:lp, lp+=pc-1, lp-=lp%pc))
-		echo "Building with $lp LTO partitions..."
-	fi
+	lp="${LTOPART:-16}"
 	mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
 fi
+$SM && mj="$mj CONFIG_DEBUG_SECTION_MISMATCH=y"
 
 [[ "$DUMPMAKE" ]] && nice() { cat -n ${!#}; }
 if ! nice "$m" $mj "${mdevs[@]}" -k -f <(cat <<EOF
@@ -265,12 +265,13 @@ echo $dev: device = $device
 echo $dev: log = build-${dev}.log
 echo $dev: fail = .failed-${dev}
 echo $dev: \
+	$($CL && echo clean-${dev}) \
 	$($CF && echo config-${dev}) \
 	$($BLD && echo build-${dev}) \
 	$($UP && echo savemap-${dev}) \
 	$($PKG && echo package-${dev})
 
-if [[ "$branch" ]]
+if [[ "$branch" ]] && $BLD
 then	echo gen_ksrc-$dev: $ksrc
 else	echo gen_ksrc-$dev:
 fi
@@ -370,6 +371,7 @@ fi
 $BLD && askyn "Review build logs?" && \
 		less $(sed 's/\(^\| \)\([^ ]*\)/build-\2.log /g' <<<"${devs[*]}")
 
+# TODO: find previous package to use for flashing/uploading?
 ! $PKG && echo && die 0 "packaging disabled by --$($KO && echo modules || echo no-package)."
 
 # TODO: make flashing work with branched builds somehow?
