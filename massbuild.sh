@@ -10,7 +10,7 @@ HERE="$(dirname "$(readlink -f "$0")")"
 # Kernel version username
 export KBUILD_BUILD_USER=decimalman
 
-# Kernel source location, relative to massbuild.sh
+# Kernel source location
 if [[ "$TW" == "yup" ]]
 then	KSRC="$HERE/../tw"
 else	KSRC="$HERE/../dkp"
@@ -38,11 +38,15 @@ fi
 # defconfig format, will be expanded per-device
 CFGFMT='cyanogen_$(device)_defconfig'
 
+# LTO partition count for non-release/release builds
+LTOPART=(16 4)
+
 # Where to push flashable builds to (internal/external storage)
 FLASH=external
 
 # Upload configuration
 UPFMT='$rname-$(maybe-branch)$device-$bdate.zip'
+# FIXME: array-ize
 UPDIR='dkp/$rpath$(maybe-legacy)'
 UPDIR_EXP='dkp/Scary Tests'
 UPLOAD=(solidfiles mediafire) # ftp
@@ -161,8 +165,7 @@ do
 	(m|--modules) KO=true; PKG=false;;
 	(n|--no-package) PKG=false;;
 	(N|--no-build) BLD=false;;
-	(r|--release) tmpdevs=("${ALLDEVS[@]}"); CF=true; UP=true
-		MAKEJOBS="${MAKEJOBS:-8}"; LTOPART="${LTOPART:-4}";;
+	(r|--release) tmpdevs=("${ALLDEVS[@]}"); CF=true; UP=true; LTOPART="${LTOPART[1]}";;
 	(s|--sparse) SP=true;;
 	(S|--section-mismatch) SM=true;;
 	(u|--upload) UP=true;;
@@ -245,7 +248,7 @@ else
 	then	pc="$MAKEJOBS"
 	else	pc="$(grep '^processor\W*:' /proc/cpuinfo | wc -l)"
 	fi
-	lp="${LTOPART:-16}"
+	lp="$LTOPART"
 	mj="-j$pc CONFIG_LTO_PARTITIONS=$lp"
 fi
 $SM && mj="$mj CONFIG_DEBUG_SECTION_MISMATCH=y"
