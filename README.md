@@ -3,7 +3,7 @@ dkp-build:
 
 dkp-build contains the utilities used to build dkp.  At present, it's composed of massbuild.sh, a number of dkp- or d2-specific files, and a few small utilities (see src/README).
 
-massbuild.sh is intended to simplify most tasks related to dkp development: configuration, compilation, installation, and public release.  Since dkp is built with multiple configurations, from multiple source branchs, across multiple repositories, massbuild.sh builds everything with external build trees and possibly external source trees.  This allows multiple builds to happen incrementally and in parallel, with no manual management of configurations or source branches required.  However, separate build trees consume dramatically more space, and may waste some CPU by building identical files repeatedly.
+massbuild.sh is intended to simplify most tasks related to dkp development: configuration, compilation, installation, and public release.  Since dkp is built with multiple configurations, from multiple source branches, across multiple repositories, massbuild.sh builds everything with external build trees and possibly external source trees.  This allows multiple builds to happen incrementally and in parallel, with no manual management of configurations or source branches required.  However, separate build trees consume dramatically more space, and may waste some CPU by building identical files repeatedly.
 
 Notable massbuild.sh features:
 -----------------
@@ -20,6 +20,11 @@ A few settings (paths and such) are available at the top of massbuild.sh.  Pay a
 massbuild.sh expects a few helpers stuffed into the source Makefile: DKP\_NAME provides a short name for the general build target (e.g. "aosp51"), and DKP\_LABEL provides a pretty label for uploaded builds (e.g. "dkp for AOSP 5.1.x").
 
 If uploading to FTP, netrc(5) is probably the only workable way to authenticate curl.  If uploading to MediaFire, you'll need plowshare; its configuration lives in ~/.config/plowshare.
+
+Packaging:
+----------
+
+massbuild.sh can automatically package builds, though not in particularly a configurable way.  Directories of the format "installer-$DKP\_NAME" will be used as a skeleton.  The built zImage will be renamed dkp-zImage and zipped along with all kernel modules and the skeleton.  No install scripts are generated, so the installer must be able to figure out what to do on its own.
 
 Usage:
 ------
